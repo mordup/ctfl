@@ -43,6 +43,14 @@ chmod +x CTFL-x86_64.AppImage
 
 ### Arch Linux
 
+Download the `.pkg.tar.zst` from the [Releases](https://github.com/mordup/ctfl/releases) page and install:
+
+```bash
+sudo pacman -U ctfl-*-any.pkg.tar.zst
+```
+
+Or build from source:
+
 ```bash
 git clone https://github.com/mordup/ctfl.git
 cd ctfl

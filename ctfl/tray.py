@@ -178,21 +178,24 @@ class TrayIcon(QSystemTrayIcon):
         from .providers import format_tokens
         from .popup import _format_reset
 
-        lines = ["Claude Tracker For Linux"]
+        lines = ["Claude Tracker For Linux (CTFL)"]
 
-        # Today's usage right under the title
-        today = datetime.now().strftime("%Y-%m-%d")
-        today_data = next((d for d in data.daily if d.date == today), None)
-        if today_data:
-            lines.append(f"Today: {format_tokens(today_data.total_tokens)} tokens")
+        if self._config.tooltip_today:
+            today = datetime.now().strftime("%Y-%m-%d")
+            today_data = next((d for d in data.daily if d.date == today), None)
+            if today_data:
+                lines.append(f"Today: {format_tokens(today_data.total_tokens)} tokens")
 
-        # Blank line then rate limits
-        if data.limits:
+        if self._config.tooltip_limits and data.limits:
             lines.append("")
             for info in data.limits:
                 reset = _format_reset(info.resets_at)
                 reset_part = f" ({reset.lower()})" if reset else ""
                 lines.append(f"{info.name}: {info.utilization:.0f}%{reset_part}")
+
+        if self._config.tooltip_sync:
+            lines.append("")
+            lines.append(f"Last sync: {datetime.now().strftime('%H:%M')}")
 
         self.setToolTip("\n".join(lines))
 

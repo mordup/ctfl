@@ -14,12 +14,13 @@
 
 ## Features
 
-- **System tray icon** with a rich tooltip showing today's token count and rate limit status
+- **System tray icon** with a configurable tooltip showing today's token count, rate limits, and last sync time
 - **Usage popup** with daily and per-model token breakdowns displayed as bar charts
 - **Plan usage limits** — see current session and weekly utilization with reset countdowns
 - **Multiple data sources** — read from local Claude Code conversation logs, the Anthropic Admin API, or both
 - **Auto-refresh** on a configurable interval
 - **Autostart** on login
+- **Restart** from the tray menu without manually relaunching
 
 <p align="center">
   <img src="screenshots/usage_daily.png" width="380" alt="Daily usage view">
@@ -29,9 +30,18 @@
 
 ## Installation
 
-### Arch Linux (AUR / local PKGBUILD)
+Pre-built packages are available on the [Releases](https://github.com/mordup/ctfl/releases) page.
 
-Clone the repository and build the package:
+### AppImage (any distro)
+
+Download `CTFL-x86_64.AppImage`, make it executable, and run:
+
+```bash
+chmod +x CTFL-x86_64.AppImage
+./CTFL-x86_64.AppImage
+```
+
+### Arch Linux
 
 ```bash
 git clone https://github.com/mordup/ctfl.git
@@ -39,23 +49,24 @@ cd ctfl
 makepkg -si
 ```
 
-This installs `ctfl` system-wide with its icon and desktop entry.
+### Debian / Ubuntu
 
-### Manual (pip)
+```bash
+sudo dpkg -i ctfl_*_amd64.deb
+```
+
+### Fedora / RPM
+
+```bash
+sudo rpm -i ctfl-*.x86_64.rpm
+```
+
+### pip
 
 Requires Python 3.11+ and PyQt6.
 
 ```bash
-git clone https://github.com/mordup/ctfl.git
-cd ctfl
-pip install .
-```
-
-Then copy the icon and desktop file manually:
-
-```bash
-sudo install -Dm644 icons/ctfl.svg /usr/share/icons/hicolor/scalable/apps/ctfl.svg
-sudo install -Dm644 ctfl.desktop /usr/share/applications/ctfl.desktop
+pip install ctfl
 ```
 
 ## Usage

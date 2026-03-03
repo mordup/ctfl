@@ -57,3 +57,27 @@ class Config:
     @days_to_show.setter
     def days_to_show(self, v: int) -> None:
         self._s.setValue("days_to_show", v)
+
+    @property
+    def tooltip_today(self) -> bool:
+        return self._get("tooltip_today", True, bool)
+
+    @tooltip_today.setter
+    def tooltip_today(self, v: bool) -> None:
+        self._s.setValue("tooltip_today", v)
+
+    @property
+    def tooltip_limits(self) -> bool:
+        return self._get("tooltip_limits", True, bool)
+
+    @tooltip_limits.setter
+    def tooltip_limits(self, v: bool) -> None:
+        self._s.setValue("tooltip_limits", v)
+
+    @property
+    def tooltip_sync(self) -> bool:
+        return self._get("tooltip_sync", True, bool)
+
+    @tooltip_sync.setter
+    def tooltip_sync(self, v: bool) -> None:
+        self._s.setValue("tooltip_sync", v)

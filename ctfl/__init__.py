@@ -1,4 +1,4 @@
 """Claude Tracker For Linux"""
 
-__version__ = "1.2.2"
-__changelog__ = "Date format DD MMMM, capitalized model names, UI polish"
+__version__ = "1.3.0"
+__changelog__ = "Configurable tooltip, tighter rate limit spacing, 24h reset times, HH:MM format"

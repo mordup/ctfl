@@ -64,7 +64,7 @@ class PopupWidget(QWidget):
         # Footer
         footer = QHBoxLayout()
         self._status_label = QLabel()
-        self._status_label.setStyleSheet("color: gray; font-size: 11px;")
+        self._status_label.setStyleSheet("color: gray;")
         footer.addWidget(self._status_label)
         footer.addStretch()
         refresh_btn = QPushButton("Refresh")
@@ -98,7 +98,8 @@ class PopupWidget(QWidget):
         parts.append(
             f"Period total: {format_tokens(total_tokens)} tokens"
         )
-        self._summary_label.setText("\n".join(parts))
+        html = "".join(f"<p style='margin: 2px 0;'>{p}</p>" for p in parts)
+        self._summary_label.setText(html)
 
         # Daily bar chart
         max_day_tokens = max((d.total_tokens for d in data.daily), default=1) or 1
@@ -106,7 +107,7 @@ class PopupWidget(QWidget):
         for day in data.daily:
             # Format date: "Mar 03" from "2026-03-03"
             try:
-                label = _dt.strptime(day.date, "%Y-%m-%d").strftime("%b %d")
+                label = _dt.strptime(day.date, "%Y-%m-%d").strftime("%d %B").title()
             except ValueError:
                 label = day.date
             detail = f"{format_tokens(day.total_tokens)} tokens"
@@ -141,18 +142,17 @@ class PopupWidget(QWidget):
         section_label = QLabel("Plan usage limits")
         font = section_label.font()
         font.setBold(True)
+        font.setPointSizeF(font.pointSizeF() * 1.15)
         section_label.setFont(font)
         self._limits_layout.addWidget(section_label)
 
         for info in limits:
-            name_label = QLabel(info.name)
-            self._limits_layout.addWidget(name_label)
-
             reset_text = _format_reset(info.resets_at)
+            text = info.name
             if reset_text:
-                reset_label = QLabel(reset_text)
-                reset_label.setStyleSheet("color: gray; font-size: 11px;")
-                self._limits_layout.addWidget(reset_label)
+                text += f"<br><span style='color: gray;'>{reset_text}</span>"
+            name_label = QLabel(text)
+            self._limits_layout.addWidget(name_label)
 
             bar_row = QHBoxLayout()
             bar_row.setSpacing(8)
@@ -166,7 +166,6 @@ class PopupWidget(QWidget):
                 "QProgressBar::chunk { background: #5B9BF6; border-radius: 5px; }"
             )
             pct_label = QLabel(f"{info.utilization:.0f}% used")
-            pct_label.setStyleSheet("font-size: 11px;")
 
             bar_row.addWidget(bar, 1)
             bar_row.addWidget(pct_label)
@@ -319,4 +318,4 @@ def _short_model(model: str) -> str:
         if len(p) == 8 and p.isdigit():
             continue
         cleaned.append(p)
-    return "-".join(cleaned)
+    return "-".join(cleaned).capitalize()

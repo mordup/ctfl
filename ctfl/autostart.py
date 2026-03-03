@@ -2,16 +2,18 @@ import shutil
 import sys
 from pathlib import Path
 
-AUTOSTART_DIR = Path.home() / ".config" / "autostart"
-DESKTOP_FILE = AUTOSTART_DIR / "ctfl.desktop"
+from .constants import APP_DISPLAY_NAME, APP_NAME, ICON_THEME_NAME
 
-DESKTOP_TEMPLATE = """\
+AUTOSTART_DIR = Path.home() / ".config" / "autostart"
+DESKTOP_FILE = AUTOSTART_DIR / f"{APP_NAME}.desktop"
+
+DESKTOP_TEMPLATE = f"""\
 [Desktop Entry]
 Type=Application
-Name=Claude Tracker For Linux
+Name={APP_DISPLAY_NAME}
 Comment=Claude usage tracker for Linux
-Exec={exec_path}
-Icon=ctfl
+Exec={{exec_path}}
+Icon={ICON_THEME_NAME}
 Terminal=false
 X-KDE-autostart-after=panel
 """
@@ -23,11 +25,11 @@ class Autostart:
 
     def enable(self, exec_path: str | None = None) -> None:
         if exec_path is None:
-            installed = shutil.which("ctfl")
+            installed = shutil.which(APP_NAME)
             if installed:
                 exec_path = installed
             else:
-                exec_path = f"{sys.executable} -m ctfl"
+                exec_path = f"{sys.executable} -m {APP_NAME}"
         AUTOSTART_DIR.mkdir(parents=True, exist_ok=True)
         DESKTOP_FILE.write_text(DESKTOP_TEMPLATE.format(exec_path=exec_path))
 

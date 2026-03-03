@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # Build all release artifacts for CTFL
+# All outputs go into dist/
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -7,6 +8,8 @@ cd "$(dirname "$0")/.."
 VERSION=$(python3 -c "from ctfl import __version__; print(__version__)")
 echo "Building CTFL v${VERSION} release artifacts..."
 echo
+
+mkdir -p dist
 
 # PyPI wheel + sdist
 echo "=== PyPI (wheel + sdist) ==="
@@ -38,6 +41,8 @@ fi
 if command -v python-appimage &>/dev/null; then
     echo "=== AppImage ==="
     python-appimage build app -p 3.11 appimage/
+    # Move AppImage artifacts into dist/
+    mv -f ./*.AppImage dist/ 2>/dev/null || true
     echo
 else
     echo "--- Skipping AppImage (python-appimage not installed) ---"
@@ -45,8 +50,4 @@ else
 fi
 
 echo "=== Release artifacts ==="
-ls -lh dist/*.whl dist/*.tar.gz 2>/dev/null || true
-ls -lh *.pkg.tar.zst 2>/dev/null || true
-ls -lh *.deb 2>/dev/null || true
-ls -lh *.rpm 2>/dev/null || true
-ls -lh *.AppImage 2>/dev/null || true
+ls -lh dist/ 2>/dev/null || true

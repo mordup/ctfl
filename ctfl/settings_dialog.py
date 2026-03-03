@@ -9,6 +9,7 @@ from PyQt6.QtWidgets import (
     QDialogButtonBox,
     QFormLayout,
     QGroupBox,
+    QHBoxLayout,
     QLineEdit,
     QRadioButton,
     QSpinBox,
@@ -17,6 +18,7 @@ from PyQt6.QtWidgets import (
 
 from .autostart import Autostart
 from .config import Config
+from .constants import APP_DISPLAY_NAME, ICON_THEME_NAME
 from .credentials import Credentials
 
 
@@ -34,21 +36,27 @@ class SettingsDialog(QDialog):
         self._config = config
         self._credentials = credentials
         self._autostart = autostart
-        self.setWindowTitle("Claude Tracker For Linux — Settings")
-        self.setWindowIcon(QIcon.fromTheme("ctfl"))
-        self.setMinimumWidth(400)
+        self.setWindowTitle(f"{APP_DISPLAY_NAME} — Settings")
+        self.setWindowIcon(QIcon.fromTheme(ICON_THEME_NAME))
+        self.setMinimumWidth(600)
         self._build_ui()
         self._load()
 
     def _build_ui(self) -> None:
-        layout = QVBoxLayout(self)
+        outer = QVBoxLayout(self)
+
+        columns = QHBoxLayout()
+        left = QVBoxLayout()
+        right = QVBoxLayout()
+
+        # --- Left column ---
 
         # Data source
         source_group = QGroupBox("Usage Data Source")
         source_layout = QVBoxLayout(source_group)
         self._source_buttons = QButtonGroup(self)
-        self._rb_local = QRadioButton("Local logs (Claude Code conversation files)")
-        self._rb_api = QRadioButton("Admin API (organization usage)")
+        self._rb_local = QRadioButton("Local logs")
+        self._rb_api = QRadioButton("Admin API")
         self._rb_both = QRadioButton("Both")
         self._source_buttons.addButton(self._rb_local, 0)
         self._source_buttons.addButton(self._rb_api, 1)
@@ -56,16 +64,16 @@ class SettingsDialog(QDialog):
         source_layout.addWidget(self._rb_local)
         source_layout.addWidget(self._rb_api)
         source_layout.addWidget(self._rb_both)
-        layout.addWidget(source_group)
+        left.addWidget(source_group)
 
         # API key
         api_group = QGroupBox("Admin API Key")
         api_layout = QFormLayout(api_group)
         self._api_key_input = QLineEdit()
         self._api_key_input.setEchoMode(QLineEdit.EchoMode.Password)
-        self._api_key_input.setPlaceholderText("Enter Anthropic Admin API key")
+        self._api_key_input.setPlaceholderText("Anthropic Admin API key")
         api_layout.addRow("API Key:", self._api_key_input)
-        layout.addWidget(api_group)
+        left.addWidget(api_group)
         self._api_group = api_group
 
         # Display
@@ -81,7 +89,11 @@ class SettingsDialog(QDialog):
         self._refresh_spin.setSuffix(" min")
         display_layout.addRow("Refresh interval:", self._refresh_spin)
         self._auto_refresh_check.toggled.connect(self._refresh_spin.setEnabled)
-        layout.addWidget(display_group)
+        left.addWidget(display_group)
+
+        left.addStretch()
+
+        # --- Right column ---
 
         # Tooltip
         tooltip_group = QGroupBox("Tooltip Info")
@@ -92,11 +104,32 @@ class SettingsDialog(QDialog):
         tooltip_layout.addWidget(self._tooltip_today)
         tooltip_layout.addWidget(self._tooltip_limits)
         tooltip_layout.addWidget(self._tooltip_sync)
-        layout.addWidget(tooltip_group)
+        right.addWidget(tooltip_group)
 
-        # Autostart
+        # Notifications
+        notif_group = QGroupBox("Notifications")
+        notif_layout = QFormLayout(notif_group)
+        self._rate_limit_check = QCheckBox("Warn when rate limit is high")
+        notif_layout.addRow(self._rate_limit_check)
+        self._rate_limit_spin = QSpinBox()
+        self._rate_limit_spin.setRange(1, 100)
+        self._rate_limit_spin.setSuffix("%")
+        notif_layout.addRow("Threshold:", self._rate_limit_spin)
+        self._rate_limit_check.toggled.connect(self._rate_limit_spin.setEnabled)
+        right.addWidget(notif_group)
+
+        # System
+        system_group = QGroupBox("System")
+        system_layout = QVBoxLayout(system_group)
         self._autostart_check = QCheckBox("Start on login")
-        layout.addWidget(self._autostart_check)
+        system_layout.addWidget(self._autostart_check)
+        right.addWidget(system_group)
+
+        right.addStretch()
+
+        columns.addLayout(left, 1)
+        columns.addLayout(right, 1)
+        outer.addLayout(columns)
 
         # Wire source radio to enable/disable API key
         self._source_buttons.idToggled.connect(self._on_source_changed)
@@ -107,7 +140,7 @@ class SettingsDialog(QDialog):
         )
         buttons.accepted.connect(self._apply)
         buttons.rejected.connect(self.reject)
-        layout.addWidget(buttons)
+        outer.addWidget(buttons)
 
     def _on_source_changed(self, id_: int, checked: bool) -> None:
         if checked:
@@ -134,6 +167,9 @@ class SettingsDialog(QDialog):
         self._tooltip_today.setChecked(self._config.tooltip_today)
         self._tooltip_limits.setChecked(self._config.tooltip_limits)
         self._tooltip_sync.setChecked(self._config.tooltip_sync)
+        self._rate_limit_check.setChecked(self._config.rate_limit_warning)
+        self._rate_limit_spin.setValue(self._config.rate_limit_threshold)
+        self._rate_limit_spin.setEnabled(self._config.rate_limit_warning)
         self._autostart_check.setChecked(self._autostart.is_enabled())
 
         # Trigger initial state
@@ -152,6 +188,10 @@ class SettingsDialog(QDialog):
         self._config.tooltip_today = self._tooltip_today.isChecked()
         self._config.tooltip_limits = self._tooltip_limits.isChecked()
         self._config.tooltip_sync = self._tooltip_sync.isChecked()
+
+        # Notifications
+        self._config.rate_limit_warning = self._rate_limit_check.isChecked()
+        self._config.rate_limit_threshold = self._rate_limit_spin.value()
 
         # API key
         key_text = self._api_key_input.text().strip()

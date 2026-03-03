@@ -1,9 +1,11 @@
 from PyQt6.QtCore import QSettings
 
+from .constants import APP_NAME
+
 
 class Config:
     def __init__(self) -> None:
-        self._s = QSettings("ctfl", "ctfl")
+        self._s = QSettings(APP_NAME, APP_NAME)
 
     def _get(self, key: str, default, typ=None):
         v = self._s.value(key, default)
@@ -81,3 +83,19 @@ class Config:
     @tooltip_sync.setter
     def tooltip_sync(self, v: bool) -> None:
         self._s.setValue("tooltip_sync", v)
+
+    @property
+    def rate_limit_warning(self) -> bool:
+        return self._get("rate_limit_warning", True, bool)
+
+    @rate_limit_warning.setter
+    def rate_limit_warning(self, v: bool) -> None:
+        self._s.setValue("rate_limit_warning", v)
+
+    @property
+    def rate_limit_threshold(self) -> int:
+        return self._get("rate_limit_threshold", 80, int)
+
+    @rate_limit_threshold.setter
+    def rate_limit_threshold(self, v: int) -> None:
+        self._s.setValue("rate_limit_threshold", v)

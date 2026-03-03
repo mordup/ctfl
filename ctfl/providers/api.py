@@ -6,6 +6,7 @@ from urllib.error import URLError, HTTPError
 import json
 
 from . import DailyUsage, ModelTokens, UsageData
+from ..constants import DATE_FMT_ISO
 
 BASE_URL = "https://api.anthropic.com/v1/organizations"
 
@@ -21,17 +22,21 @@ class ApiProvider:
         try:
             return self._fetch(api_key, days)
         except HTTPError as e:
-            if e.code in (401, 403):
-                return UsageData(error=f"API authentication failed ({e.code})")
-            return UsageData(error=f"API error: {e.code}")
+            if e.code == 401:
+                return UsageData(error="API: invalid API key")
+            if e.code == 403:
+                return UsageData(error="API: key lacks admin permissions")
+            if e.code == 429:
+                return UsageData(error="API: rate limited, try again later")
+            return UsageData(error=f"API: HTTP {e.code}")
         except (URLError, OSError) as e:
-            return UsageData(error=f"Network error: {e}")
+            return UsageData(error=f"API: network error — {e}")
         except Exception as e:
-            return UsageData(error=str(e))
+            return UsageData(error=f"API: {e}")
 
     def _fetch(self, api_key: str, days: int) -> UsageData:
-        end = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-        start = (datetime.now(timezone.utc) - timedelta(days=days)).strftime("%Y-%m-%d")
+        end = datetime.now(timezone.utc).strftime(DATE_FMT_ISO)
+        start = (datetime.now(timezone.utc) - timedelta(days=days)).strftime(DATE_FMT_ISO)
 
         headers = {
             "x-api-key": api_key,
@@ -58,6 +63,9 @@ class ApiProvider:
             return json.loads(resp.read())
 
     def _parse(self, usage_data: dict, cost_data: dict) -> UsageData:
+        if not isinstance(usage_data.get("data"), list):
+            return UsageData(error="API: unexpected response structure")
+
         daily: list[DailyUsage] = []
         by_model: dict[str, ModelTokens] = {}
 
@@ -65,7 +73,7 @@ class ApiProvider:
         for item in cost_data.get("data", []):
             cost_by_date[item.get("date", "")] = item.get("cost_usd", 0)
 
-        for item in usage_data.get("data", []):
+        for item in usage_data["data"]:
             date = item.get("date", "")
             day = DailyUsage(
                 date=date,

@@ -1,6 +1,6 @@
 # Maintainer: Morgan <morgan@example.com>
 pkgname=ctfl
-pkgver=1.3.0
+pkgver=2.0.0
 pkgrel=1
 pkgdesc="Claude Tracker For Linux — system tray monitor for Claude usage"
 arch=('any')
@@ -19,6 +19,7 @@ makedepends=(
 )
 source=()
 sha256sums=()
+PKGDEST="${startdir}/dist"
 
 build() {
     cd "$startdir"

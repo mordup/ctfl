@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import os
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -212,7 +211,7 @@ class TrayIcon(QSystemTrayIcon):
 
     def _show_about(self) -> None:
         from PyQt6.QtCore import Qt
-        from . import __version__
+        from . import __changelog__, __version__
 
         dlg = QDialog()
         dlg.setWindowTitle("About CTFL")
@@ -232,6 +231,18 @@ class TrayIcon(QSystemTrayIcon):
         )
         title_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(title_label)
+
+        changelog_label = QLabel(
+            f"<b>Changelog</b><br>{__changelog__}"
+        )
+        changelog_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        changelog_label.setWordWrap(True)
+        changelog_label.setContentsMargins(10, 8, 10, 8)
+        changelog_label.setStyleSheet(
+            "background-color: palette(midlight);"
+            "border-radius: 6px;"
+        )
+        layout.addWidget(changelog_label)
 
         desc_label = QLabel(
             "A lightweight system tray app to monitor your "
@@ -275,7 +286,10 @@ class TrayIcon(QSystemTrayIcon):
         if self._thread is not None and self._thread.isRunning():
             self._thread.quit()
             self._thread.wait(5000)
-        os.execv(sys.executable, [sys.executable, "-m", "ctfl"])
+        from PyQt6.QtCore import QProcess
+        from PyQt6.QtWidgets import QApplication
+        QProcess.startDetached(sys.executable, ["-m", "ctfl"])
+        QApplication.quit()
 
     def _quit(self) -> None:
         if self._thread is not None and self._thread.isRunning():

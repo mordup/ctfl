@@ -105,12 +105,6 @@ Configure the data source and API key in **Settings**.
   <img src="screenshots/settings.png" width="480" alt="Settings dialog">
 </p>
 
-<p align="center">
-  <img src="screenshots/tray.png" alt="System tray icon">
-  &nbsp;&nbsp;
-  <img src="screenshots/tray_option_menu.png" alt="Tray context menu">
-</p>
-
 ## Compatibility
 
 Works on any Linux desktop environment with system tray support:

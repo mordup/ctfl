@@ -11,6 +11,7 @@ from PyQt6.QtWidgets import (
     QGroupBox,
     QHBoxLayout,
     QLineEdit,
+    QMessageBox,
     QRadioButton,
     QSpinBox,
     QVBoxLayout,
@@ -195,20 +196,28 @@ class SettingsDialog(QDialog):
 
         # API key
         key_text = self._api_key_input.text().strip()
-        if key_text:
-            self._credentials.set_api_key(key_text)
-        elif self._config.data_source == "local":
-            pass  # don't delete key just because field is empty on local mode
-        else:
-            self._credentials.delete_api_key()
+        try:
+            if key_text:
+                self._credentials.set_api_key(key_text)
+            elif self._config.data_source == "local":
+                pass  # don't delete key just because field is empty on local mode
+            else:
+                self._credentials.delete_api_key()
+        except Exception as e:
+            QMessageBox.warning(self, "Error", str(e))
+            return
 
         # Autostart
-        if self._autostart_check.isChecked():
-            self._autostart.enable()
-            self._config.autostart = True
-        else:
-            self._autostart.disable()
-            self._config.autostart = False
+        try:
+            if self._autostart_check.isChecked():
+                self._autostart.enable()
+                self._config.autostart = True
+            else:
+                self._autostart.disable()
+                self._config.autostart = False
+        except Exception as e:
+            QMessageBox.warning(self, "Error", str(e))
+            return
 
         self.settings_changed.emit()
         self.accept()

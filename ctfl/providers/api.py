@@ -66,7 +66,7 @@ class ApiProvider:
         if not isinstance(usage_data.get("data"), list):
             return UsageData(error="API: unexpected response structure")
 
-        daily: list[DailyUsage] = []
+        daily_map: dict[str, DailyUsage] = {}
         by_model: dict[str, ModelTokens] = {}
 
         cost_by_date = {}
@@ -75,25 +75,37 @@ class ApiProvider:
 
         for item in usage_data["data"]:
             date = item.get("date", "")
-            day = DailyUsage(
-                date=date,
-                input_tokens=item.get("input_tokens", 0),
-                output_tokens=item.get("output_tokens", 0),
-                cache_read_tokens=item.get("cache_read_input_tokens", 0),
-                cache_creation_tokens=item.get("cache_creation_input_tokens", 0),
-                cost_usd=cost_by_date.get(date),
-            )
-            daily.append(day)
+            input_t = item.get("input_tokens", 0)
+            output_t = item.get("output_tokens", 0)
+            cache_read = item.get("cache_read_input_tokens", 0)
+            cache_create = item.get("cache_creation_input_tokens", 0)
+
+            if date in daily_map:
+                day = daily_map[date]
+                day.input_tokens += input_t
+                day.output_tokens += output_t
+                day.cache_read_tokens += cache_read
+                day.cache_creation_tokens += cache_create
+            else:
+                day = DailyUsage(
+                    date=date,
+                    input_tokens=input_t,
+                    output_tokens=output_t,
+                    cache_read_tokens=cache_read,
+                    cache_creation_tokens=cache_create,
+                    cost_usd=cost_by_date.get(date),
+                )
+                daily_map[date] = day
 
             model = item.get("model", "unknown")
             if model not in by_model:
                 by_model[model] = ModelTokens(model=model)
             mt = by_model[model]
-            mt.input_tokens += day.input_tokens
-            mt.output_tokens += day.output_tokens
-            mt.cache_read_tokens += day.cache_read_tokens
-            mt.cache_creation_tokens += day.cache_creation_tokens
+            mt.input_tokens += input_t
+            mt.output_tokens += output_t
+            mt.cache_read_tokens += cache_read
+            mt.cache_creation_tokens += cache_create
 
-        daily.sort(key=lambda d: d.date, reverse=True)
+        daily = sorted(daily_map.values(), key=lambda d: d.date, reverse=True)
         model_list = sorted(by_model.values(), key=lambda m: m.total, reverse=True)
         return UsageData(daily=daily, by_model=model_list)

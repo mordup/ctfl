@@ -14,7 +14,10 @@ class Credentials:
             return None
 
     def set_api_key(self, key: str) -> None:
-        keyring.set_password(_SERVICE, _KEY_NAME, key)
+        try:
+            keyring.set_password(_SERVICE, _KEY_NAME, key)
+        except Exception as e:
+            raise RuntimeError(f"Failed to save API key: {e}") from e
 
     def delete_api_key(self) -> None:
         try:

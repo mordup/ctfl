@@ -68,3 +68,23 @@ def test_parse_bad_structure():
     provider = _make_provider()
     result = provider._parse({"data": "not-a-list"}, {})
     assert result.error is not None
+
+
+def test_parse_aggregates_same_date():
+    """Multiple API entries for the same date (different models) should merge into one DailyUsage."""
+    provider = _make_provider()
+    usage_data = {
+        "data": [
+            {"date": "2026-03-03", "model": "claude-opus-4-6", "input_tokens": 1000, "output_tokens": 500},
+            {"date": "2026-03-03", "model": "claude-sonnet-4-6", "input_tokens": 2000, "output_tokens": 800},
+            {"date": "2026-03-02", "model": "claude-opus-4-6", "input_tokens": 100, "output_tokens": 50},
+        ]
+    }
+    result = provider._parse(usage_data, {})
+    assert len(result.daily) == 2
+    # The 2026-03-03 entry should be aggregated
+    day_03 = next(d for d in result.daily if d.date == "2026-03-03")
+    assert day_03.input_tokens == 3000
+    assert day_03.output_tokens == 1300
+    # Models should still be separate
+    assert len(result.by_model) == 2

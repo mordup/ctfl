@@ -21,5 +21,8 @@ venv/
 *.tar.gz
 *.tar.zst
 *.whl
+*.deb
+*.rpm
+*.AppImage
 pkg/
 src/

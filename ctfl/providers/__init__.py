@@ -1,6 +1,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import Protocol
+
+
+def format_cost(usd: float) -> str:
+    return f"${usd:.2f}"
 
 
 def format_tokens(n: int) -> str:
@@ -50,8 +55,21 @@ class RateLimitInfo:
 
 
 @dataclass
+class ProjectUsage:
+    name: str
+    path: str
+    total_tokens: int = 0
+    message_count: int = 0
+
+
+@dataclass
 class UsageData:
     daily: list[DailyUsage] = field(default_factory=list)
     by_model: list[ModelTokens] = field(default_factory=list)
+    by_project: list[ProjectUsage] = field(default_factory=list)
     limits: list[RateLimitInfo] = field(default_factory=list)
     error: str | None = None
+
+
+class UsageProvider(Protocol):
+    def fetch(self, days: int) -> UsageData: ...

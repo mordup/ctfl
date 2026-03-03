@@ -5,11 +5,49 @@ from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from . import DailyUsage, ModelTokens, UsageData
+from . import DailyUsage, ModelTokens, ProjectUsage, UsageData
+from ..constants import DATE_FMT_ISO
 
 CLAUDE_DIR = Path.home() / ".claude"
 STATS_FILE = CLAUDE_DIR / "stats-cache.json"
 PROJECTS_DIR = CLAUDE_DIR / "projects"
+
+
+def _resolve_project_name(project_path: Path) -> str:
+    """Derive a human-readable name for a project directory.
+
+    The directory name under ~/.claude/projects/ is a path-encoded string
+    like '-home-morgan-Projects-ctfl'. We can't simply replace - with /
+    because path components may contain hyphens (e.g. 'my-project').
+    Walk the filesystem to reconstruct the real path.
+    """
+    dirname = project_path.name
+    if not dirname.startswith("-"):
+        return dirname.capitalize()
+
+    segments = dirname[1:].split("-")  # strip leading -, split on -
+    resolved = Path("/")
+    i = 0
+    while i < len(segments):
+        # Try joining progressively more segments (longest first)
+        # to handle hyphenated directory names like "my-project"
+        matched = False
+        for j in range(len(segments), i, -1):
+            candidate = "-".join(segments[i:j])
+            if (resolved / candidate).is_dir():
+                resolved = resolved / candidate
+                i = j
+                matched = True
+                break
+        if not matched:
+            # Directory doesn't exist (deleted project); use remaining as-is
+            resolved = resolved / "-".join(segments[i:])
+            break
+
+    return resolved.name.capitalize()
+
+
+_MAX_CACHE_ENTRIES = 200
 
 
 class LocalProvider:
@@ -20,11 +58,17 @@ class LocalProvider:
     def fetch(self, days: int) -> UsageData:
         try:
             return self._fetch(days)
+        except json.JSONDecodeError:
+            return UsageData(error="Local: corrupt stats-cache file")
+        except PermissionError:
+            return UsageData(error="Local: cannot read Claude data files")
+        except OSError as e:
+            return UsageData(error=f"Local: file access error — {e}")
         except Exception as e:
-            return UsageData(error=str(e))
+            return UsageData(error=f"Local: {e}")
 
     def _fetch(self, days: int) -> UsageData:
-        cutoff_date = (datetime.now(timezone.utc) - timedelta(days=days)).strftime("%Y-%m-%d")
+        cutoff_date = (datetime.now(timezone.utc) - timedelta(days=days)).strftime(DATE_FMT_ISO)
         cache_data = self._read_stats_cache()
         cache_cutoff = cache_data.get("lastComputedDate", "")
 
@@ -51,10 +95,13 @@ class LocalProvider:
                 message_count=activity.get("messageCount", 0),
                 session_count=activity.get("sessionCount", 0),
             )
-            # dailyModelTokens only has combined totals per model
+            # stats-cache only stores combined totals per model per day
+            # (no input/output/cache breakdown), so we store the sum as
+            # input_tokens; the JSONL scan fills in real breakdowns for
+            # dates after the cache cutoff.
             model_tokens = tokens_by_date.get(date_str, {})
             total = sum(model_tokens.values())
-            day.input_tokens = total  # best we can do from cache
+            day.input_tokens = total
             daily_map[date_str] = day
 
         # Process cached model usage for overall totals
@@ -68,7 +115,7 @@ class LocalProvider:
             )
 
         # Scan JSONL files for data after cache cutoff
-        jsonl_daily, jsonl_models = self._scan_jsonl_files(cache_cutoff, cutoff_date)
+        jsonl_daily, jsonl_models, by_project = self._scan_jsonl_files(cache_cutoff, cutoff_date)
 
         # JSONL data takes precedence for overlapping dates
         for date_str, day in jsonl_daily.items():
@@ -93,7 +140,7 @@ class LocalProvider:
             reverse=True,
         )
 
-        return UsageData(daily=daily_list, by_model=model_list)
+        return UsageData(daily=daily_list, by_model=model_list, by_project=by_project)
 
     def _read_stats_cache(self) -> dict:
         if not STATS_FILE.exists():
@@ -106,20 +153,21 @@ class LocalProvider:
 
     def _scan_jsonl_files(
         self, cache_cutoff: str, cutoff_date: str
-    ) -> tuple[dict[str, DailyUsage], dict[str, ModelTokens]]:
+    ) -> tuple[dict[str, DailyUsage], dict[str, ModelTokens], list[ProjectUsage]]:
         daily_map: dict[str, DailyUsage] = {}
         model_totals: dict[str, ModelTokens] = defaultdict(
             lambda: ModelTokens(model="")
         )
         session_dates: dict[str, set[str]] = defaultdict(set)
+        project_agg: dict[str, dict] = {}  # project_dir -> {tokens, messages}
 
         if not PROJECTS_DIR.exists():
-            return daily_map, dict(model_totals)
+            return daily_map, dict(model_totals), []
 
         # Find all JSONL files, filter by mtime for performance
         if cache_cutoff:
             try:
-                cutoff_ts = datetime.strptime(cache_cutoff, "%Y-%m-%d").replace(
+                cutoff_ts = datetime.strptime(cache_cutoff, DATE_FMT_ISO).replace(
                     tzinfo=timezone.utc
                 ).timestamp()
             except ValueError:
@@ -137,6 +185,13 @@ class LocalProvider:
                     continue
 
         for filepath in jsonl_files:
+            # Determine project directory from file path
+            try:
+                rel = filepath.relative_to(PROJECTS_DIR)
+                project_dir = rel.parts[0]
+            except (ValueError, IndexError):
+                project_dir = ""
+
             records = self._parse_jsonl(filepath)
             for rec in records:
                 date_str = rec["date"]
@@ -146,6 +201,7 @@ class LocalProvider:
                     continue
 
                 model = rec["model"]
+                rec_tokens = rec["input_tokens"] + rec["output_tokens"] + rec["cache_read"] + rec["cache_creation"]
 
                 if date_str not in daily_map:
                     daily_map[date_str] = DailyUsage(date=date_str)
@@ -167,11 +223,30 @@ class LocalProvider:
                 mt.cache_read_tokens += rec["cache_read"]
                 mt.cache_creation_tokens += rec["cache_creation"]
 
+                # Aggregate per-project
+                if project_dir:
+                    if project_dir not in project_agg:
+                        project_agg[project_dir] = {"tokens": 0, "messages": 0}
+                    project_agg[project_dir]["tokens"] += rec_tokens
+                    project_agg[project_dir]["messages"] += 1
+
         for date_str, sessions in session_dates.items():
             if date_str in daily_map:
                 daily_map[date_str].session_count = len(sessions)
 
-        return daily_map, dict(model_totals)
+        # Build project usage list
+        projects = []
+        for project_dir, agg in project_agg.items():
+            name = _resolve_project_name(PROJECTS_DIR / project_dir)
+            projects.append(ProjectUsage(
+                name=name,
+                path=project_dir,
+                total_tokens=agg["tokens"],
+                message_count=agg["messages"],
+            ))
+        projects.sort(key=lambda p: p.total_tokens, reverse=True)
+
+        return daily_map, dict(model_totals), projects
 
     def _parse_jsonl(self, filepath: Path) -> list[dict]:
         try:
@@ -222,4 +297,9 @@ class LocalProvider:
             return []
 
         self._file_cache[cache_key] = records
+        # Evict oldest entries if cache is too large
+        if len(self._file_cache) > _MAX_CACHE_ENTRIES:
+            oldest = sorted(self._file_cache, key=lambda k: k[1])
+            for k in oldest[: len(self._file_cache) - _MAX_CACHE_ENTRIES]:
+                del self._file_cache[k]
         return records

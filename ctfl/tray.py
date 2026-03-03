@@ -6,59 +6,67 @@ from pathlib import Path
 
 from PyQt6.QtCore import QObject, QThread, QTimer, pyqtSignal
 from PyQt6.QtGui import QAction, QIcon
-from PyQt6.QtWidgets import (
-    QDialog,
-    QDialogButtonBox,
-    QLabel,
-    QMenu,
-    QSystemTrayIcon,
-    QVBoxLayout,
-)
-
-_ICON_PATHS = [
-    Path("/usr/share/icons/hicolor/scalable/apps/ctfl.svg"),
-    Path(__file__).resolve().parent / "icons" / "ctfl.svg",      # bundled in package
-    Path(__file__).resolve().parent.parent / "icons" / "ctfl.svg",  # dev layout
-]
+from PyQt6.QtWidgets import QMenu, QSystemTrayIcon
 
 from .autostart import Autostart
 from .config import Config
+from .constants import (
+    APP_DISPLAY_NAME,
+    APP_NAME,
+    DATE_FMT_ISO,
+    ICON_THEME_NAME,
+    TIME_FMT_HM,
+)
 from .credentials import Credentials
 from .popup import PopupWidget
-from .providers import UsageData
+from .providers import UsageData, UsageProvider
 from .providers.api import ApiProvider
 from .providers.local import LocalProvider
 from .providers.oauth import OAuthUsageProvider
 from .settings_dialog import SettingsDialog
 
+_ICON_PATHS = [
+    Path(f"/usr/share/icons/hicolor/scalable/apps/{ICON_THEME_NAME}.svg"),
+    Path(__file__).resolve().parent / "icons" / f"{ICON_THEME_NAME}.svg",      # bundled in package
+    Path(__file__).resolve().parent.parent / "icons" / f"{ICON_THEME_NAME}.svg",  # dev layout
+]
+
 
 class _FetchWorker(QObject):
     finished = pyqtSignal(UsageData)
 
-    def __init__(self, providers: list, days: int) -> None:
+    def __init__(self, providers: list[UsageProvider], days: int) -> None:
         super().__init__()
-        self._providers = providers
+        self._providers: list[UsageProvider] = providers
         self._days = days
 
     def run(self) -> None:
         merged = UsageData()
         errors = []
-        for provider in self._providers:
-            result = provider.fetch(self._days)
-            if result.error:
-                errors.append(result.error)
-            else:
-                # Merge: use first provider's daily as base, extend model data
-                if not merged.daily:
-                    merged.daily = result.daily
-                if result.by_model:
-                    existing = {m.model for m in merged.by_model}
-                    for m in result.by_model:
-                        if m.model not in existing:
-                            merged.by_model.append(m)
-                            existing.add(m.model)
-                if result.limits:
-                    merged.limits.extend(result.limits)
+        try:
+            for provider in self._providers:
+                result = provider.fetch(self._days)
+                if result.error:
+                    errors.append(result.error)
+                else:
+                    if not merged.daily:
+                        merged.daily = result.daily
+                    if result.by_model:
+                        existing = {m.model for m in merged.by_model}
+                        for m in result.by_model:
+                            if m.model not in existing:
+                                merged.by_model.append(m)
+                                existing.add(m.model)
+                    if result.by_project:
+                        existing_projects = {p.path for p in merged.by_project}
+                        for p in result.by_project:
+                            if p.path not in existing_projects:
+                                merged.by_project.append(p)
+                                existing_projects.add(p.path)
+                    if result.limits:
+                        merged.limits.extend(result.limits)
+        except Exception as e:
+            errors.append(f"Merge error: {e}")
         if errors and not merged.daily:
             merged.error = "; ".join(errors)
         self.finished.emit(merged)
@@ -83,8 +91,9 @@ class TrayIcon(QSystemTrayIcon):
         self._oauth = oauth_provider
         self._thread: QThread | None = None
         self._latest_data: UsageData | None = None
+        self._warned_limits: set[str] = set()
 
-        icon = QIcon.fromTheme("ctfl")
+        icon = QIcon.fromTheme(ICON_THEME_NAME)
         if icon.isNull():
             for path in _ICON_PATHS:
                 if path.exists():
@@ -93,7 +102,7 @@ class TrayIcon(QSystemTrayIcon):
         if icon.isNull():
             icon = QIcon.fromTheme("utilities-system-monitor")
         self.setIcon(icon)
-        self.setToolTip("Claude Tracker For Linux")
+        self.setToolTip(APP_DISPLAY_NAME)
 
         self._popup = PopupWidget(config)
         self._popup.refresh_requested.connect(self.refresh)
@@ -153,6 +162,8 @@ class TrayIcon(QSystemTrayIcon):
         if self._thread is not None and self._thread.isRunning():
             return
 
+        self._popup.show_loading()
+
         if self._thread is not None:
             self._thread.deleteLater()
             self._thread = None
@@ -173,18 +184,25 @@ class TrayIcon(QSystemTrayIcon):
 
     def _on_data(self, data: UsageData) -> None:
         self._latest_data = data
+        self._update_tooltip(data)
+        self._check_rate_limits(data)
+        if self._popup.isVisible():
+            self._popup.update_data(data)
 
-        # Build rich tooltip
-        from .providers import format_tokens
+    def _update_tooltip(self, data: UsageData) -> None:
+        from .providers import format_cost, format_tokens
         from .popup import _format_reset
 
-        lines = ["Claude Tracker For Linux (CTFL)"]
+        lines = [f"{APP_DISPLAY_NAME} (CTFL)"]
 
         if self._config.tooltip_today:
-            today = datetime.now().strftime("%Y-%m-%d")
+            today = datetime.now().strftime(DATE_FMT_ISO)
             today_data = next((d for d in data.daily if d.date == today), None)
             if today_data:
-                lines.append(f"Today: {format_tokens(today_data.total_tokens)} tokens")
+                today_line = f"Today: {format_tokens(today_data.total_tokens)} tokens"
+                if today_data.cost_usd is not None:
+                    today_line += f" · {format_cost(today_data.cost_usd)}"
+                lines.append(today_line)
 
         if self._config.tooltip_limits and data.limits:
             lines.append("")
@@ -195,16 +213,30 @@ class TrayIcon(QSystemTrayIcon):
 
         if self._config.tooltip_sync:
             lines.append("")
-            lines.append(f"Last sync: {datetime.now().strftime('%H:%M')}")
+            lines.append(f"Last sync: {datetime.now().strftime(TIME_FMT_HM)}")
 
         self.setToolTip("\n".join(lines))
 
-        if self._popup.isVisible():
-            self._popup.update_data(data)
+    def _check_rate_limits(self, data: UsageData) -> None:
+        if not self._config.rate_limit_warning or not data.limits:
+            return
+        threshold = self._config.rate_limit_threshold
+        for info in data.limits:
+            if info.utilization >= threshold:
+                if info.name not in self._warned_limits:
+                    self._warned_limits.add(info.name)
+                    self.showMessage(
+                        APP_DISPLAY_NAME,
+                        f"{info.name} at {info.utilization:.0f}%",
+                        QSystemTrayIcon.MessageIcon.Warning,
+                        5000,
+                    )
+            else:
+                self._warned_limits.discard(info.name)
 
-    def _get_providers(self) -> list:
+    def _get_providers(self) -> list[UsageProvider]:
         source = self._config.data_source
-        providers = []
+        providers: list[UsageProvider] = []
         if source in ("local", "both"):
             providers.append(self._local)
         if source in ("api", "both"):
@@ -213,61 +245,8 @@ class TrayIcon(QSystemTrayIcon):
         return providers
 
     def _show_about(self) -> None:
-        from PyQt6.QtCore import Qt
-        from . import __changelog__, __version__
-
-        dlg = QDialog()
-        dlg.setWindowTitle("About CTFL")
-        dlg.setWindowIcon(QIcon.fromTheme("ctfl"))
-        dlg.setFixedWidth(320)
-
-        layout = QVBoxLayout(dlg)
-        layout.setSpacing(10)
-
-        icon_label = QLabel()
-        icon_label.setPixmap(QIcon.fromTheme("ctfl").pixmap(64, 64))
-        icon_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(icon_label)
-
-        title_label = QLabel(
-            f"<b>CTFL — Claude Tracker For Linux</b><br>v{__version__}"
-        )
-        title_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(title_label)
-
-        changelog_label = QLabel(
-            f"<b>Changelog</b><br>{__changelog__}"
-        )
-        changelog_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        changelog_label.setWordWrap(True)
-        changelog_label.setContentsMargins(10, 8, 10, 8)
-        changelog_label.setStyleSheet(
-            "background-color: palette(midlight);"
-            "border-radius: 6px;"
-        )
-        layout.addWidget(changelog_label)
-
-        desc_label = QLabel(
-            "A lightweight system tray app to monitor your "
-            "Claude token usage and rate limits."
-            "<br><br>"
-            "Fully generated by AI using "
-            "<a href='https://claude.ai/claude-code'>Claude Code</a>."
-            "<br><br>"
-            "<a href='https://github.com/mordup/ctfl'>GitHub</a> · "
-            "MIT License"
-        )
-        desc_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        desc_label.setWordWrap(True)
-        desc_label.setOpenExternalLinks(True)
-        layout.addWidget(desc_label)
-
-        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok)
-        buttons.setCenterButtons(True)
-        buttons.accepted.connect(dlg.accept)
-        layout.addWidget(buttons)
-
-        dlg.exec()
+        from .about_dialog import AboutDialog
+        AboutDialog(self.contextMenu()).exec()
 
     def _show_settings(self) -> None:
         self._popup.hide()
@@ -285,18 +264,22 @@ class TrayIcon(QSystemTrayIcon):
         else:
             self._timer.stop()
 
+    def _cleanup_thread(self) -> None:
+        if self._thread is None or not self._thread.isRunning():
+            return
+        self._thread.quit()
+        if not self._thread.wait(5000):
+            self._thread.terminate()
+            self._thread.wait(2000)
+
     def _restart(self) -> None:
-        if self._thread is not None and self._thread.isRunning():
-            self._thread.quit()
-            self._thread.wait(5000)
+        self._cleanup_thread()
         from PyQt6.QtCore import QProcess
         from PyQt6.QtWidgets import QApplication
-        QProcess.startDetached(sys.executable, ["-m", "ctfl"])
+        QProcess.startDetached(sys.executable, ["-m", APP_NAME])
         QApplication.quit()
 
     def _quit(self) -> None:
-        if self._thread is not None and self._thread.isRunning():
-            self._thread.quit()
-            self._thread.wait(5000)
+        self._cleanup_thread()
         from PyQt6.QtWidgets import QApplication
         QApplication.quit()

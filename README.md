@@ -15,8 +15,10 @@
 ## Features
 
 - **System tray icon** with a configurable tooltip showing today's token count, rate limits, and last sync time
-- **Usage popup** with daily and per-model token breakdowns displayed as bar charts
+- **Usage popup** with daily, per-model, and per-project token breakdowns displayed as bar charts
+- **Cost tracking** — see daily and total costs alongside token counts (Admin API)
 - **Plan usage limits** — see current session and weekly utilization with reset countdowns
+- **Per-project breakdown** — token usage grouped by Claude Code project
 - **Multiple data sources** — read from local Claude Code conversation logs, the Anthropic Admin API, or both
 - **Auto-refresh** on a configurable interval
 - **Autostart** on login
@@ -98,6 +100,16 @@ ctfl
 | **Both** | Merges data from both sources |
 
 Configure the data source and API key in **Settings**.
+
+<p align="center">
+  <img src="screenshots/settings.png" width="480" alt="Settings dialog">
+</p>
+
+<p align="center">
+  <img src="screenshots/tray.png" alt="System tray icon">
+  &nbsp;&nbsp;
+  <img src="screenshots/tray_option_menu.png" alt="Tray context menu">
+</p>
 
 ## Compatibility
 

@@ -16,7 +16,13 @@ from PyQt6.QtWidgets import (
 )
 
 from .config import Config
-from .providers import RateLimitInfo, UsageData, format_tokens
+from .constants import DATE_FMT_DISPLAY, DATE_FMT_ISO, DATETIME_FMT_WEEKDAY, ICON_THEME_NAME, TIME_FMT_HM
+from .providers import RateLimitInfo, UsageData, format_cost, format_tokens
+
+_PROGRESS_BAR_STYLE = (
+    "QProgressBar { background: #3a3a3a; border: none; border-radius: 5px; }"
+    "QProgressBar::chunk { background: #5B9BF6; border-radius: 5px; }"
+)
 
 
 class PopupWidget(QWidget):
@@ -31,7 +37,7 @@ class PopupWidget(QWidget):
         )
         self._config = config
         self.setWindowTitle("Claude Usage")
-        self.setWindowIcon(QIcon.fromTheme("ctfl"))
+        self.setWindowIcon(QIcon.fromTheme(ICON_THEME_NAME))
         self._build_ui()
         self.setMinimumWidth(480)
 
@@ -56,8 +62,10 @@ class PopupWidget(QWidget):
         self._tabs = QTabWidget()
         self._daily_chart = _BarChartWidget()
         self._model_chart = _BarChartWidget()
+        self._project_chart = _BarChartWidget()
         self._tabs.addTab(self._daily_chart, "Daily")
         self._tabs.addTab(self._model_chart, "By Model")
+        self._tabs.addTab(self._project_chart, "By Project")
         self._tabs.currentChanged.connect(lambda _: self._fit_to_content())
         layout.addWidget(self._tabs)
 
@@ -67,37 +75,44 @@ class PopupWidget(QWidget):
         self._status_label.setStyleSheet("color: gray;")
         footer.addWidget(self._status_label)
         footer.addStretch()
-        refresh_btn = QPushButton("Refresh")
-        refresh_btn.clicked.connect(self.refresh_requested.emit)
-        footer.addWidget(refresh_btn)
+        self._refresh_btn = QPushButton("Refresh")
+        self._refresh_btn.clicked.connect(self.refresh_requested.emit)
+        footer.addWidget(self._refresh_btn)
         settings_btn = QPushButton("Settings")
         settings_btn.clicked.connect(self.settings_requested.emit)
         footer.addWidget(settings_btn)
         layout.addLayout(footer)
 
     def update_data(self, data: UsageData) -> None:
+        self._refresh_btn.setEnabled(True)
+        self._refresh_btn.setText("Refresh")
+
         self._update_limits(data.limits)
 
         if data.error:
             self._summary_label.setText(f"Error: {data.error}")
             self._daily_chart.set_rows([])
             self._model_chart.set_rows([])
+            self._project_chart.set_rows([])
             self._update_status()
             return
 
         # Summary
-        today = _dt.now().strftime("%Y-%m-%d")
+        today = _dt.now().strftime(DATE_FMT_ISO)
         today_data = next((d for d in data.daily if d.date == today), None)
         total_tokens = sum(d.total_tokens for d in data.daily)
 
         parts = []
         if today_data:
-            parts.append(
-                f"Today: {format_tokens(today_data.total_tokens)} tokens"
-            )
-        parts.append(
-            f"Period total: {format_tokens(total_tokens)} tokens"
-        )
+            today_text = f"Today: {format_tokens(today_data.total_tokens)} tokens"
+            if today_data.cost_usd is not None:
+                today_text += f" · {format_cost(today_data.cost_usd)}"
+            parts.append(today_text)
+        total_text = f"Period total: {format_tokens(total_tokens)} tokens"
+        total_cost = sum(d.cost_usd for d in data.daily if d.cost_usd is not None)
+        if total_cost:
+            total_text += f" · {format_cost(total_cost)}"
+        parts.append(total_text)
         html = "".join(f"<p style='margin: 2px 0;'>{p}</p>" for p in parts)
         self._summary_label.setText(html)
 
@@ -107,10 +122,12 @@ class PopupWidget(QWidget):
         for day in data.daily:
             # Format date: "Mar 03" from "2026-03-03"
             try:
-                label = _dt.strptime(day.date, "%Y-%m-%d").strftime("%d %B").title()
+                label = _dt.strptime(day.date, DATE_FMT_ISO).strftime(DATE_FMT_DISPLAY).title()
             except ValueError:
                 label = day.date
             detail = f"{format_tokens(day.total_tokens)} tokens"
+            if day.cost_usd is not None:
+                detail += f" · {format_cost(day.cost_usd)}"
             daily_rows.append((label, day.total_tokens, max_day_tokens, detail))
         self._daily_chart.set_rows(daily_rows)
 
@@ -123,6 +140,17 @@ class PopupWidget(QWidget):
             model_rows.append((label, mt.total, max_model_total, detail))
         self._model_chart.set_rows(model_rows)
 
+        # Project bar chart
+        if data.by_project:
+            max_project = max(p.total_tokens for p in data.by_project) or 1
+            project_rows = []
+            for proj in data.by_project:
+                detail = format_tokens(proj.total_tokens)
+                project_rows.append((proj.name, proj.total_tokens, max_project, detail))
+            self._project_chart.set_rows(project_rows)
+        else:
+            self._project_chart.set_rows([])
+
         self._update_status()
         self._fit_to_content()
 
@@ -134,7 +162,11 @@ class PopupWidget(QWidget):
                 item.widget().setParent(None)
 
         if not limits:
-            self._limits_frame.setVisible(False)
+            self._limits_frame.setVisible(True)
+            hint = QLabel("Log in to claude.ai for rate limits")
+            hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            hint.setStyleSheet("color: gray;")
+            self._limits_layout.addWidget(hint)
             return
 
         self._limits_frame.setVisible(True)
@@ -161,10 +193,7 @@ class PopupWidget(QWidget):
             bar.setValue(int(info.utilization))
             bar.setTextVisible(False)
             bar.setFixedHeight(10)
-            bar.setStyleSheet(
-                "QProgressBar { background: #3a3a3a; border: none; border-radius: 5px; }"
-                "QProgressBar::chunk { background: #5B9BF6; border-radius: 5px; }"
-            )
+            bar.setStyleSheet(_PROGRESS_BAR_STYLE)
             pct_label = QLabel(f"{info.utilization:.0f}% used")
 
             bar_row.addWidget(bar, 1)
@@ -179,23 +208,35 @@ class PopupWidget(QWidget):
 
     def _update_status(self) -> None:
         self._status_label.setText(
-            f"Last updated: {_dt.now().strftime('%H:%M')}"
+            f"Last updated: {_dt.now().strftime(TIME_FMT_HM)}"
         )
 
     def _fit_to_content(self) -> None:
-        # Size the tab widget to fit the active tab content
+        # Size the tab widget to exactly fit the active tab content.
         active = self._tabs.currentWidget()
         if active:
             hint = active.sizeHint()
             tab_bar_h = self._tabs.tabBar().sizeHint().height()
             needed = hint.height() + tab_bar_h + 8
-            # Only grow, never shrink (avoids flicker on refresh)
-            if needed > self._tabs.minimumHeight():
-                self._tabs.setMinimumHeight(needed)
-        self.adjustSize()
+        else:
+            needed = 0
+        self._tabs.setFixedHeight(max(needed, self._tabs.minimumSizeHint().height()))
+        if self.isVisible():
+            # Don't shrink while visible — only grow if needed
+            current = self.size()
+            ideal = self.sizeHint()
+            if ideal.width() > current.width() or ideal.height() > current.height():
+                self.resize(max(current.width(), ideal.width()),
+                            max(current.height(), ideal.height()))
+        else:
+            self.adjustSize()
+        # Restore flexibility for future resizes
+        self._tabs.setMaximumHeight(16777215)
 
     def show_loading(self) -> None:
         self._summary_label.setText("Loading...")
+        self._refresh_btn.setEnabled(False)
+        self._refresh_btn.setText("Loading...")
 
     def position_near_tray(self, tray_geometry) -> None:
         screen = self.screen()
@@ -265,10 +306,7 @@ class _BarChartWidget(QWidget):
             bar.setValue(value)
             bar.setTextVisible(False)
             bar.setFixedHeight(10)
-            bar.setStyleSheet(
-                "QProgressBar { background: #3a3a3a; border: none; border-radius: 5px; }"
-                "QProgressBar::chunk { background: #5B9BF6; border-radius: 5px; }"
-            )
+            bar.setStyleSheet(_PROGRESS_BAR_STYLE)
             row_layout.addWidget(bar)
 
             self._layout.insertWidget(self._layout.count() - 1, row_widget)
@@ -303,7 +341,7 @@ def _format_reset(resets_at: str | None) -> str:
             return f"Resets in {hours} hr {minutes} min"
         # More than a day: show weekday and time
         local_time = reset_time.astimezone()
-        return f"Resets {local_time.strftime('%a %H:%M')}"
+        return f"Resets {local_time.strftime(DATETIME_FMT_WEEKDAY)}"
     except (ValueError, TypeError):
         return ""
 

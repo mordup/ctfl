@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+import sys
 from datetime import datetime
 from pathlib import Path
 
@@ -16,7 +18,8 @@ from PyQt6.QtWidgets import (
 
 _ICON_PATHS = [
     Path("/usr/share/icons/hicolor/scalable/apps/ctfl.svg"),
-    Path(__file__).resolve().parent.parent / "icons" / "ctfl.svg",
+    Path(__file__).resolve().parent / "icons" / "ctfl.svg",      # bundled in package
+    Path(__file__).resolve().parent.parent / "icons" / "ctfl.svg",  # dev layout
 ]
 
 from .autostart import Autostart
@@ -126,6 +129,10 @@ class TrayIcon(QSystemTrayIcon):
         menu.addAction(version_action)
 
         menu.addSeparator()
+
+        restart_action = QAction("Restart", menu)
+        restart_action.triggered.connect(self._restart)
+        menu.addAction(restart_action)
 
         quit_action = QAction("Quit", menu)
         quit_action.triggered.connect(self._quit)
@@ -263,6 +270,12 @@ class TrayIcon(QSystemTrayIcon):
             self._timer.start(self._config.refresh_interval * 1000)
         else:
             self._timer.stop()
+
+    def _restart(self) -> None:
+        if self._thread is not None and self._thread.isRunning():
+            self._thread.quit()
+            self._thread.wait(5000)
+        os.execv(sys.executable, [sys.executable, "-m", "ctfl"])
 
     def _quit(self) -> None:
         if self._thread is not None and self._thread.isRunning():

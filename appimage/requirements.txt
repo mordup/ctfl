@@ -1,1 +1,2 @@
-ctfl==2.0.0
+# Overwritten by scripts/release.sh at build time
+ctfl

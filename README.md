@@ -76,14 +76,6 @@ sudo dpkg -i ctfl_*_amd64.deb
 sudo rpm -i ctfl-*.x86_64.rpm
 ```
 
-### pip
-
-Requires Python 3.11+ and PyQt6.
-
-```bash
-pip install ctfl
-```
-
 ## Usage
 
 Launch from your application menu or run:

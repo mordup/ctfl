@@ -30,8 +30,11 @@ class Autostart:
                 exec_path = installed
             else:
                 exec_path = f"{sys.executable} -m {APP_NAME}"
-        AUTOSTART_DIR.mkdir(parents=True, exist_ok=True)
-        DESKTOP_FILE.write_text(DESKTOP_TEMPLATE.format(exec_path=exec_path))
+        try:
+            AUTOSTART_DIR.mkdir(parents=True, exist_ok=True)
+            DESKTOP_FILE.write_text(DESKTOP_TEMPLATE.format(exec_path=exec_path))
+        except OSError as e:
+            raise RuntimeError(f"Failed to enable autostart: {e}") from e
 
     def disable(self) -> None:
         try:

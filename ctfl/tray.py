@@ -164,23 +164,31 @@ class TrayIcon(QSystemTrayIcon):
 
         self._popup.show_loading()
 
-        if self._thread is not None:
-            self._thread.deleteLater()
-            self._thread = None
+        # Previous thread already finished — clear references
+        self._thread = None
+        self._worker = None
 
         providers = self._get_providers()
         if not providers:
             self._popup.update_data(UsageData(error="No data source configured"))
             return
 
-        self._thread = QThread()
+        thread = QThread()
         worker = _FetchWorker(providers, self._config.days_to_show)
-        worker.moveToThread(self._thread)
-        self._thread.started.connect(worker.run)
+        worker.moveToThread(thread)
+        thread.started.connect(worker.run)
         worker.finished.connect(self._on_data)
-        worker.finished.connect(self._thread.quit)
+        worker.finished.connect(thread.quit)
+        thread.finished.connect(lambda: self._on_thread_finished(thread))
+        self._thread = thread
         self._worker = worker
-        self._thread.start()
+        thread.start()
+
+    def _on_thread_finished(self, thread: QThread) -> None:
+        thread.deleteLater()
+        if self._thread is thread:
+            self._thread = None
+            self._worker = None
 
     def _on_data(self, data: UsageData) -> None:
         self._latest_data = data
@@ -241,7 +249,9 @@ class TrayIcon(QSystemTrayIcon):
             providers.append(self._local)
         if source in ("api", "both"):
             providers.append(self._api)
-        providers.append(self._oauth)
+        # Only fetch OAuth rate limits when they'll actually be shown
+        if self._config.tooltip_limits or self._config.rate_limit_warning:
+            providers.append(self._oauth)
         return providers
 
     def _show_about(self) -> None:

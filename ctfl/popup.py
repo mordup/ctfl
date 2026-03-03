@@ -159,7 +159,9 @@ class PopupWidget(QWidget):
         while self._limits_layout.count():
             item = self._limits_layout.takeAt(0)
             if item.widget():
-                item.widget().setParent(None)
+                item.widget().deleteLater()
+            elif item.layout():
+                _clear_layout(item.layout())
 
         if not limits:
             self._limits_frame.setVisible(True)
@@ -275,7 +277,7 @@ class _BarChartWidget(QWidget):
         while self._layout.count() > 1:
             item = self._layout.takeAt(0)
             if item.widget():
-                item.widget().setParent(None)
+                item.widget().deleteLater()
             elif item.layout():
                 _clear_layout(item.layout())
 
@@ -316,7 +318,7 @@ def _clear_layout(layout) -> None:
     while layout.count():
         item = layout.takeAt(0)
         if item.widget():
-            item.widget().setParent(None)
+            item.widget().deleteLater()
         elif item.layout():
             _clear_layout(item.layout())
 

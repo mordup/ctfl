@@ -6,5 +6,6 @@ Comment=Monitor Claude usage from your system tray
 Exec=ctfl
 Icon=ctfl
 Terminal=false
+StartupNotify=false
 Categories=Utility;System;Monitor;
 Keywords=claude;tokens;usage;anthropic;

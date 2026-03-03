@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Protocol, runtime_checkable
 
 
 def format_tokens(n: int) -> str:
@@ -56,8 +55,3 @@ class UsageData:
     by_model: list[ModelTokens] = field(default_factory=list)
     limits: list[RateLimitInfo] = field(default_factory=list)
     error: str | None = None
-
-
-@runtime_checkable
-class UsageProvider(Protocol):
-    def fetch(self, days: int) -> UsageData: ...

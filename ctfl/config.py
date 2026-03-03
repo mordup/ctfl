@@ -12,7 +12,10 @@ class Config:
                 return v.lower() in ("true", "1", "yes")
             return bool(v)
         if typ is int:
-            return int(v)
+            try:
+                return int(v)
+            except (ValueError, TypeError):
+                return default
         return v
 
     @property

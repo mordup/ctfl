@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import os
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -184,10 +183,9 @@ class LocalProvider:
         if cache_key in self._file_cache:
             return self._file_cache[cache_key]
 
-        # Evict stale entries for same filepath
-        self._file_cache = {
-            k: v for k, v in self._file_cache.items() if k[0] != str(filepath)
-        }
+        # Evict stale entry for same filepath
+        for k in [k for k in self._file_cache if k[0] == str(filepath)]:
+            del self._file_cache[k]
 
         records: list[dict] = []
         try:

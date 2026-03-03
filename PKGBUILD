@@ -1,10 +1,10 @@
 # Maintainer: Morgan <morgan@example.com>
 pkgname=ctfl
-pkgver=1.0.0
+pkgver=1.1.0
 pkgrel=1
 pkgdesc="Claude Tracker For Linux — system tray monitor for Claude usage"
 arch=('any')
-url="https://github.com/morgan/ctfl"
+url="https://github.com/mordup/ctfl"
 license=('MIT')
 depends=(
     'python'
@@ -17,16 +17,17 @@ makedepends=(
     'python-wheel'
     'python-setuptools'
 )
-source=("$pkgname-$pkgver.tar.gz")
-sha256sums=('SKIP')
+source=()
+sha256sums=()
 
 build() {
-    cd "$pkgname-$pkgver"
+    cd "$startdir"
+    rm -rf dist
     python -m build --wheel --no-isolation
 }
 
 package() {
-    cd "$pkgname-$pkgver"
+    cd "$startdir"
     python -m installer --destdir="$pkgdir" dist/*.whl
 
     install -Dm644 icons/ctfl.svg \

@@ -83,6 +83,17 @@ class SettingsDialog(QDialog):
         self._auto_refresh_check.toggled.connect(self._refresh_spin.setEnabled)
         layout.addWidget(display_group)
 
+        # Tooltip
+        tooltip_group = QGroupBox("Tooltip Info")
+        tooltip_layout = QVBoxLayout(tooltip_group)
+        self._tooltip_today = QCheckBox("Today's usage")
+        self._tooltip_limits = QCheckBox("Rate limits")
+        self._tooltip_sync = QCheckBox("Last sync time")
+        tooltip_layout.addWidget(self._tooltip_today)
+        tooltip_layout.addWidget(self._tooltip_limits)
+        tooltip_layout.addWidget(self._tooltip_sync)
+        layout.addWidget(tooltip_group)
+
         # Autostart
         self._autostart_check = QCheckBox("Start on login")
         layout.addWidget(self._autostart_check)
@@ -120,6 +131,9 @@ class SettingsDialog(QDialog):
         self._auto_refresh_check.setChecked(self._config.auto_refresh)
         self._refresh_spin.setEnabled(self._config.auto_refresh)
         self._refresh_spin.setValue(self._config.refresh_interval // 60)
+        self._tooltip_today.setChecked(self._config.tooltip_today)
+        self._tooltip_limits.setChecked(self._config.tooltip_limits)
+        self._tooltip_sync.setChecked(self._config.tooltip_sync)
         self._autostart_check.setChecked(self._autostart.is_enabled())
 
         # Trigger initial state
@@ -133,6 +147,11 @@ class SettingsDialog(QDialog):
         self._config.auto_refresh = self._auto_refresh_check.isChecked()
         self._config.refresh_interval = self._refresh_spin.value() * 60
         self._config.days_to_show = self._days_spin.value()
+
+        # Tooltip
+        self._config.tooltip_today = self._tooltip_today.isChecked()
+        self._config.tooltip_limits = self._tooltip_limits.isChecked()
+        self._config.tooltip_sync = self._tooltip_sync.isChecked()
 
         # API key
         key_text = self._api_key_input.text().strip()

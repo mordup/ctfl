@@ -179,7 +179,7 @@ class PopupWidget(QWidget):
 
     def _update_status(self) -> None:
         self._status_label.setText(
-            f"Last updated: {_dt.now().strftime('%H:%M:%S')}"
+            f"Last updated: {_dt.now().strftime('%H:%M')}"
         )
 
     def _fit_to_content(self) -> None:
@@ -303,7 +303,7 @@ def _format_reset(resets_at: str | None) -> str:
             return f"Resets in {hours} hr {minutes} min"
         # More than a day: show weekday and time
         local_time = reset_time.astimezone()
-        return f"Resets {local_time.strftime('%a %-I:%M %p')}"
+        return f"Resets {local_time.strftime('%a %H:%M')}"
     except (ValueError, TypeError):
         return ""
 

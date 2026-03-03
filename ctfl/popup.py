@@ -1,23 +1,21 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime as _dt, timezone as _tz
 
 from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtGui import QFont
 from PyQt6.QtWidgets import (
+    QFrame,
     QHBoxLayout,
-    QHeaderView,
     QLabel,
+    QProgressBar,
     QPushButton,
     QTabWidget,
-    QTableWidget,
-    QTableWidgetItem,
     QVBoxLayout,
     QWidget,
 )
 
 from .config import Config
-from .providers import UsageData, format_tokens
+from .providers import RateLimitInfo, UsageData, format_tokens
 
 
 class PopupWidget(QWidget):
@@ -27,9 +25,11 @@ class PopupWidget(QWidget):
     def __init__(self, config: Config, parent=None) -> None:
         super().__init__(
             parent,
-            Qt.WindowType.Popup | Qt.WindowType.FramelessWindowHint,
+            Qt.WindowType.Tool
+            | Qt.WindowType.WindowStaysOnTopHint,
         )
         self._config = config
+        self.setWindowTitle("Claude Usage")
         self._build_ui()
         self.setMinimumWidth(480)
 
@@ -38,27 +38,13 @@ class PopupWidget(QWidget):
         layout.setContentsMargins(12, 10, 12, 10)
         layout.setSpacing(8)
 
-        # Header
-        header = QHBoxLayout()
-        title = QLabel("Claude Usage")
-        font = title.font()
-        font.setPointSize(font.pointSize() + 2)
-        font.setBold(True)
-        title.setFont(font)
-        header.addWidget(title)
-        header.addStretch()
-
-        settings_btn = QPushButton("Settings")
-        settings_btn.setFlat(True)
-        settings_btn.clicked.connect(self.settings_requested.emit)
-        header.addWidget(settings_btn)
-
-        close_btn = QPushButton("x")
-        close_btn.setFixedSize(24, 24)
-        close_btn.setFlat(True)
-        close_btn.clicked.connect(self.close)
-        header.addWidget(close_btn)
-        layout.addLayout(header)
+        # Rate limits section (hidden until data arrives)
+        self._limits_frame = QFrame()
+        self._limits_layout = QVBoxLayout(self._limits_frame)
+        self._limits_layout.setContentsMargins(0, 0, 0, 0)
+        self._limits_layout.setSpacing(6)
+        self._limits_frame.setVisible(False)
+        layout.addWidget(self._limits_frame)
 
         # Summary
         self._summary_label = QLabel()
@@ -66,10 +52,11 @@ class PopupWidget(QWidget):
 
         # Tabs
         self._tabs = QTabWidget()
-        self._daily_table = QTableWidget()
-        self._model_table = QTableWidget()
-        self._tabs.addTab(self._daily_table, "Daily")
-        self._tabs.addTab(self._model_table, "By Model")
+        self._daily_chart = _BarChartWidget()
+        self._model_chart = _BarChartWidget()
+        self._tabs.addTab(self._daily_chart, "Daily")
+        self._tabs.addTab(self._model_chart, "By Model")
+        self._tabs.currentChanged.connect(lambda _: self._fit_to_content())
         layout.addWidget(self._tabs)
 
         # Footer
@@ -81,94 +68,130 @@ class PopupWidget(QWidget):
         refresh_btn = QPushButton("Refresh")
         refresh_btn.clicked.connect(self.refresh_requested.emit)
         footer.addWidget(refresh_btn)
+        settings_btn = QPushButton("Settings")
+        settings_btn.clicked.connect(self.settings_requested.emit)
+        footer.addWidget(settings_btn)
         layout.addLayout(footer)
 
     def update_data(self, data: UsageData) -> None:
+        self._update_limits(data.limits)
+
         if data.error:
             self._summary_label.setText(f"Error: {data.error}")
-            self._daily_table.setRowCount(0)
-            self._model_table.setRowCount(0)
+            self._daily_chart.set_rows([])
+            self._model_chart.set_rows([])
             self._update_status()
             return
 
         # Summary
-        today = datetime.now().strftime("%Y-%m-%d")
+        today = _dt.now().strftime("%Y-%m-%d")
         today_data = next((d for d in data.daily if d.date == today), None)
         total_tokens = sum(d.total_tokens for d in data.daily)
-        total_msgs = sum(d.message_count for d in data.daily)
 
         parts = []
         if today_data:
             parts.append(
-                f"Today: {format_tokens(today_data.total_tokens)} tokens, "
-                f"{today_data.message_count} messages"
+                f"Today: {format_tokens(today_data.total_tokens)} tokens"
             )
         parts.append(
-            f"Period total: {format_tokens(total_tokens)} tokens, "
-            f"{total_msgs} messages"
+            f"Period total: {format_tokens(total_tokens)} tokens"
         )
         self._summary_label.setText("\n".join(parts))
 
-        # Daily table
-        show_cache = self._config.show_cache_tokens
-        daily_cols = ["Date", "Messages", "Sessions", "Tokens"]
-        if show_cache:
-            daily_cols.extend(["Cache Read", "Cache Write"])
+        # Daily bar chart
+        max_day_tokens = max((d.total_tokens for d in data.daily), default=1) or 1
+        daily_rows = []
+        for day in data.daily:
+            # Format date: "Mar 03" from "2026-03-03"
+            try:
+                label = _dt.strptime(day.date, "%Y-%m-%d").strftime("%b %d")
+            except ValueError:
+                label = day.date
+            detail = f"{format_tokens(day.total_tokens)} tokens"
+            daily_rows.append((label, day.total_tokens, max_day_tokens, detail))
+        self._daily_chart.set_rows(daily_rows)
 
-        self._daily_table.setColumnCount(len(daily_cols))
-        self._daily_table.setHorizontalHeaderLabels(daily_cols)
-        self._daily_table.setRowCount(len(data.daily))
-        self._daily_table.verticalHeader().setVisible(False)
-
-        for i, day in enumerate(data.daily):
-            self._daily_table.setItem(i, 0, QTableWidgetItem(day.date))
-            self._daily_table.setItem(i, 1, _num_item(day.message_count))
-            self._daily_table.setItem(i, 2, _num_item(day.session_count))
-            self._daily_table.setItem(i, 3, _num_item(day.total_tokens, fmt=True))
-            if show_cache:
-                self._daily_table.setItem(i, 4, _num_item(day.cache_read_tokens, fmt=True))
-                self._daily_table.setItem(i, 5, _num_item(day.cache_creation_tokens, fmt=True))
-
-        self._daily_table.horizontalHeader().setSectionResizeMode(
-            QHeaderView.ResizeMode.ResizeToContents
-        )
-
-        # Model table
-        model_cols = ["Model", "Input", "Output"]
-        if show_cache:
-            model_cols.extend(["Cache Read", "Cache Write"])
-        model_cols.append("Total")
-
-        self._model_table.setColumnCount(len(model_cols))
-        self._model_table.setHorizontalHeaderLabels(model_cols)
-        self._model_table.setRowCount(len(data.by_model))
-        self._model_table.verticalHeader().setVisible(False)
-
-        for i, mt in enumerate(data.by_model):
-            col = 0
-            self._model_table.setItem(i, col, QTableWidgetItem(_short_model(mt.model)))
-            col += 1
-            self._model_table.setItem(i, col, _num_item(mt.input_tokens, fmt=True))
-            col += 1
-            self._model_table.setItem(i, col, _num_item(mt.output_tokens, fmt=True))
-            col += 1
-            if show_cache:
-                self._model_table.setItem(i, col, _num_item(mt.cache_read_tokens, fmt=True))
-                col += 1
-                self._model_table.setItem(i, col, _num_item(mt.cache_creation_tokens, fmt=True))
-                col += 1
-            self._model_table.setItem(i, col, _num_item(mt.total, fmt=True))
-
-        self._model_table.horizontalHeader().setSectionResizeMode(
-            QHeaderView.ResizeMode.ResizeToContents
-        )
+        # Model bar chart
+        max_model_total = max((m.total for m in data.by_model), default=1) or 1
+        model_rows = []
+        for mt in data.by_model:
+            label = _short_model(mt.model)
+            detail = format_tokens(mt.total)
+            model_rows.append((label, mt.total, max_model_total, detail))
+        self._model_chart.set_rows(model_rows)
 
         self._update_status()
+        self._fit_to_content()
+
+    def _update_limits(self, limits: list[RateLimitInfo]) -> None:
+        # Clear previous widgets
+        while self._limits_layout.count():
+            item = self._limits_layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+
+        if not limits:
+            self._limits_frame.setVisible(False)
+            return
+
+        self._limits_frame.setVisible(True)
+
+        section_label = QLabel("Plan usage limits")
+        font = section_label.font()
+        font.setBold(True)
+        section_label.setFont(font)
+        self._limits_layout.addWidget(section_label)
+
+        for info in limits:
+            name_label = QLabel(info.name)
+            self._limits_layout.addWidget(name_label)
+
+            reset_text = _format_reset(info.resets_at)
+            if reset_text:
+                reset_label = QLabel(reset_text)
+                reset_label.setStyleSheet("color: gray; font-size: 11px;")
+                self._limits_layout.addWidget(reset_label)
+
+            bar_row = QHBoxLayout()
+            bar_row.setSpacing(8)
+            bar = QProgressBar()
+            bar.setRange(0, 100)
+            bar.setValue(int(info.utilization))
+            bar.setTextVisible(False)
+            bar.setFixedHeight(10)
+            bar.setStyleSheet(
+                "QProgressBar { background: #3a3a3a; border: none; border-radius: 5px; }"
+                "QProgressBar::chunk { background: #5B9BF6; border-radius: 5px; }"
+            )
+            pct_label = QLabel(f"{info.utilization:.0f}% used")
+            pct_label.setStyleSheet("font-size: 11px;")
+
+            bar_row.addWidget(bar, 1)
+            bar_row.addWidget(pct_label)
+            self._limits_layout.addLayout(bar_row)
+
+        # Separator line
+        sep = QFrame()
+        sep.setFrameShape(QFrame.Shape.HLine)
+        sep.setFrameShadow(QFrame.Shadow.Sunken)
+        self._limits_layout.addWidget(sep)
 
     def _update_status(self) -> None:
         self._status_label.setText(
-            f"Last updated: {datetime.now().strftime('%H:%M:%S')}"
+            f"Last updated: {_dt.now().strftime('%H:%M:%S')}"
         )
+
+    def _fit_to_content(self) -> None:
+        # Size the tab widget to fit the active tab content
+        active = self._tabs.currentWidget()
+        if active:
+            hint = active.sizeHint()
+            tab_bar_h = self._tabs.tabBar().sizeHint().height()
+            needed = hint.height() + tab_bar_h + 8
+            # Only grow, never shrink (avoids flicker on refresh)
+            if needed > self._tabs.minimumHeight():
+                self._tabs.setMinimumHeight(needed)
+        self.adjustSize()
 
     def show_loading(self) -> None:
         self._summary_label.setText("Loading...")
@@ -194,11 +217,92 @@ class PopupWidget(QWidget):
         self.move(x, y)
 
 
-def _num_item(value: int, fmt: bool = False) -> QTableWidgetItem:
-    text = format_tokens(value) if fmt else str(value)
-    item = QTableWidgetItem(text)
-    item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-    return item
+class _BarChartWidget(QWidget):
+    """List of horizontal bar-chart rows."""
+
+    def __init__(self, parent=None) -> None:
+        super().__init__(parent)
+        self._layout = QVBoxLayout(self)
+        self._layout.setContentsMargins(4, 4, 4, 4)
+        self._layout.setSpacing(6)
+        self._layout.addStretch()
+
+    def set_rows(self, rows: list[tuple[str, int, int, str]]) -> None:
+        """Set bar chart data. Each row is (label, value, max_value, detail_text)."""
+        # Clear previous rows (keep the trailing stretch)
+        while self._layout.count() > 1:
+            item = self._layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+            elif item.layout():
+                _clear_layout(item.layout())
+
+        for label_text, value, max_value, detail_text in rows:
+            row_widget = QWidget()
+            row_layout = QVBoxLayout(row_widget)
+            row_layout.setContentsMargins(0, 0, 0, 0)
+            row_layout.setSpacing(2)
+
+            # Top line: label ... detail
+            top = QHBoxLayout()
+            top.setSpacing(8)
+            label = QLabel(label_text)
+            font = label.font()
+            font.setFamily("monospace")
+            label.setFont(font)
+            label.setMinimumWidth(70)
+            top.addWidget(label)
+            top.addStretch()
+            detail = QLabel(detail_text)
+            detail.setStyleSheet("color: #aaa; font-size: 11px;")
+            top.addWidget(detail)
+            row_layout.addLayout(top)
+
+            # Bar
+            bar = QProgressBar()
+            bar.setRange(0, max_value)
+            bar.setValue(value)
+            bar.setTextVisible(False)
+            bar.setFixedHeight(10)
+            bar.setStyleSheet(
+                "QProgressBar { background: #3a3a3a; border: none; border-radius: 5px; }"
+                "QProgressBar::chunk { background: #5B9BF6; border-radius: 5px; }"
+            )
+            row_layout.addWidget(bar)
+
+            self._layout.insertWidget(self._layout.count() - 1, row_widget)
+
+
+def _clear_layout(layout) -> None:
+    while layout.count():
+        item = layout.takeAt(0)
+        if item.widget():
+            item.widget().deleteLater()
+        elif item.layout():
+            _clear_layout(item.layout())
+
+
+def _format_reset(resets_at: str | None) -> str:
+    if not resets_at:
+        return ""
+    try:
+        reset_time = _dt.fromisoformat(resets_at)
+        now = _dt.now(_tz.utc)
+        delta = reset_time - now
+        total_seconds = int(delta.total_seconds())
+        if total_seconds <= 0:
+            return "Resets soon"
+        if total_seconds < 3600:
+            return f"Resets in {total_seconds // 60} min"
+        hours = total_seconds // 3600
+        minutes = (total_seconds % 3600) // 60
+        if hours < 24:
+            return f"Resets in {hours} hr {minutes} min"
+        # More than a day: show weekday and time
+        local_time = reset_time.astimezone()
+        return f"Resets {local_time.strftime('%a %-I:%M %p')}"
+    except (ValueError, TypeError):
+        return ""
 
 
 def _short_model(model: str) -> str:

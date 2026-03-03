@@ -18,6 +18,7 @@
 - **Usage popup** with daily, per-model, and per-project token breakdowns displayed as bar charts
 - **Cost tracking** — see daily and total costs alongside token counts (Admin API)
 - **Plan usage limits** — see current session and weekly utilization with reset countdowns
+- **Rate limit alerts** — desktop notifications when usage nears the limit
 - **Per-project breakdown** — token usage grouped by Claude Code project
 - **Multiple data sources** — read from local Claude Code conversation logs, the Anthropic Admin API, or both
 - **Auto-refresh** on a configurable interval
@@ -28,6 +29,10 @@
   <img src="screenshots/usage_daily.png" width="380" alt="Daily usage view">
   &nbsp;
   <img src="screenshots/usage_models.png" width="380" alt="Per-model usage view">
+</p>
+
+<p align="center">
+  <img src="screenshots/tray_alert.png" alt="Desktop notification when approaching rate limit">
 </p>
 
 ## Installation

@@ -1,8 +1,8 @@
 # Maintainer: Morgan <morgan@example.com>
 pkgname=ctfl
-pkgver=0.1.0
+pkgver=1.0.0
 pkgrel=1
-pkgdesc="Claude Token Footprint Logger — system tray monitor for Claude API usage"
+pkgdesc="Claude Tracker For Linux — system tray monitor for Claude usage"
 arch=('any')
 url="https://github.com/morgan/ctfl"
 license=('MIT')

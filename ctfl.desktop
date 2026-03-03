@@ -1,8 +1,8 @@
 [Desktop Entry]
 Type=Application
-Name=ctfl
-GenericName=Claude Token Footprint Logger
-Comment=Monitor Claude API token usage from your system tray
+Name=Claude Tracker For Linux
+GenericName=Claude usage tracker
+Comment=Monitor Claude usage from your system tray
 Exec=ctfl
 Icon=ctfl
 Terminal=false

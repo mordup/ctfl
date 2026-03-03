@@ -8,8 +8,8 @@ DESKTOP_FILE = AUTOSTART_DIR / "ctfl.desktop"
 DESKTOP_TEMPLATE = """\
 [Desktop Entry]
 Type=Application
-Name=ctfl
-Comment=Claude Token Footprint Logger
+Name=Claude Tracker For Linux
+Comment=Claude usage tracker for Linux
 Exec={exec_path}
 Icon=ctfl
 Terminal=false

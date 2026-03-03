@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "ctfl"
 dynamic = ["version"]
-description = "Claude Token Footprint Logger — system tray monitor for Claude API usage"
+description = "Claude Tracker For Linux — system tray monitor for Claude usage"
 license = "MIT"
 requires-python = ">=3.11"
 dependencies = [

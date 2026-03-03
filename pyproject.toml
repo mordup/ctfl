@@ -46,3 +46,6 @@ include = ["ctfl*"]
 
 [tool.setuptools.package-data]
 ctfl = ["icons/*.svg"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

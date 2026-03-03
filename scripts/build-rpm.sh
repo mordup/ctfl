@@ -28,12 +28,15 @@ install -Dm644 ctfl.desktop \
 install -Dm644 LICENSE \
     "$DESTDIR/usr/share/licenses/ctfl/LICENSE"
 
+mkdir -p dist
+
 echo "==> Building .rpm with fpm..."
 ${FPM:-fpm} \
     -s dir \
     -t rpm \
     -n ctfl \
     -v "$VERSION" \
+    -p dist/ \
     --description "Claude Tracker For Linux — system tray monitor for Claude usage" \
     --url "https://github.com/mordup/ctfl" \
     --license MIT \
@@ -44,4 +47,4 @@ ${FPM:-fpm} \
     -C "$DESTDIR" \
     .
 
-echo "==> Done: ctfl-${VERSION}.noarch.rpm"
+echo "==> Done: dist/ctfl-${VERSION}-1.x86_64.rpm"

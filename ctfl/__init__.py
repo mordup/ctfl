@@ -1,4 +1,4 @@
 """Claude Tracker For Linux"""
 
-__version__ = "1.3.0"
-__changelog__ = "Configurable tooltip, tighter rate limit spacing, 24h reset times, HH:MM format"
+__version__ = "2.0.0"
+__changelog__ = "Per-project breakdown, cost display, About dialog, two-column settings, rate limit hint, test suite, bug fixes"

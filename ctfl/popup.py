@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime as _dt, timezone as _tz
 
 from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtGui import QIcon
 from PyQt6.QtWidgets import (
     QFrame,
     QHBoxLayout,
@@ -30,6 +31,7 @@ class PopupWidget(QWidget):
         )
         self._config = config
         self.setWindowTitle("Claude Usage")
+        self.setWindowIcon(QIcon.fromTheme("ctfl"))
         self._build_ui()
         self.setMinimumWidth(480)
 
@@ -128,7 +130,7 @@ class PopupWidget(QWidget):
         while self._limits_layout.count():
             item = self._limits_layout.takeAt(0)
             if item.widget():
-                item.widget().deleteLater()
+                item.widget().setParent(None)
 
         if not limits:
             self._limits_frame.setVisible(False)
@@ -233,7 +235,7 @@ class _BarChartWidget(QWidget):
         while self._layout.count() > 1:
             item = self._layout.takeAt(0)
             if item.widget():
-                item.widget().deleteLater()
+                item.widget().setParent(None)
             elif item.layout():
                 _clear_layout(item.layout())
 
@@ -277,7 +279,7 @@ def _clear_layout(layout) -> None:
     while layout.count():
         item = layout.takeAt(0)
         if item.widget():
-            item.widget().deleteLater()
+            item.widget().setParent(None)
         elif item.layout():
             _clear_layout(item.layout())
 
@@ -292,6 +294,8 @@ def _format_reset(resets_at: str | None) -> str:
         total_seconds = int(delta.total_seconds())
         if total_seconds <= 0:
             return "Resets soon"
+        if total_seconds < 60:
+            return "Resets in <1 min"
         if total_seconds < 3600:
             return f"Resets in {total_seconds // 60} min"
         hours = total_seconds // 3600

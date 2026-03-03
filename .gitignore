@@ -19,4 +19,7 @@ venv/
 
 # Distribution
 *.tar.gz
+*.tar.zst
 *.whl
+pkg/
+src/

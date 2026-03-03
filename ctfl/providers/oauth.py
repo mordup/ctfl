@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 from . import RateLimitInfo, UsageData
@@ -24,8 +23,6 @@ class OAuthUsageProvider:
             if not token:
                 return UsageData()
             return self._fetch(token)
-        except (HTTPError, URLError, OSError) as e:
-            return UsageData(error=f"OAuth usage: {e}")
         except Exception as e:
             return UsageData(error=f"OAuth usage: {e}")
 

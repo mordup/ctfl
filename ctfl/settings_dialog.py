@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from PyQt6.QtCore import pyqtSignal
+from PyQt6.QtGui import QIcon
 from PyQt6.QtWidgets import (
     QButtonGroup,
     QCheckBox,
@@ -34,6 +35,7 @@ class SettingsDialog(QDialog):
         self._credentials = credentials
         self._autostart = autostart
         self.setWindowTitle("Claude Tracker For Linux — Settings")
+        self.setWindowIcon(QIcon.fromTheme("ctfl"))
         self.setMinimumWidth(400)
         self._build_ui()
         self._load()

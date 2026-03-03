@@ -20,7 +20,7 @@
     <rect x="16" y="32" width="32" height="4"/>
     <rect x="20" y="36" width="24" height="4"/>
   </g>
-  <g fill="#ffffff">
+  <g fill="#000000">
     <!-- Eyes -->
     <rect x="20" y="24" width="4" height="4"/>
     <rect x="40" y="24" width="4" height="4"/>

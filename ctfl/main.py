@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""ctfl — Claude Token Footprint Logger"""
+"""Claude Tracker For Linux"""
 
 import sys
 
@@ -11,6 +11,7 @@ from .config import Config
 from .credentials import Credentials
 from .providers.api import ApiProvider
 from .providers.local import LocalProvider
+from .providers.oauth import OAuthUsageProvider
 from .tray import TrayIcon
 
 
@@ -22,7 +23,7 @@ def main() -> int:
     # Singleton guard
     shared = QSharedMemory("ctfl-singleton")
     if not shared.create(1):
-        print("ctfl is already running.", file=sys.stderr)
+        print("Claude Tracker For Linux is already running.", file=sys.stderr)
         return 1
 
     config = Config()
@@ -30,8 +31,9 @@ def main() -> int:
     autostart = Autostart()
     local_provider = LocalProvider()
     api_provider = ApiProvider(credentials.get_api_key)
+    oauth_provider = OAuthUsageProvider()
 
-    tray = TrayIcon(config, credentials, autostart, local_provider, api_provider)
+    tray = TrayIcon(config, credentials, autostart, local_provider, api_provider, oauth_provider)
     tray.show()
 
     return app.exec()

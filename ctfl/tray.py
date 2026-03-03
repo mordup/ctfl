@@ -1,10 +1,16 @@
 from __future__ import annotations
 
 from datetime import datetime
+from pathlib import Path
 
 from PyQt6.QtCore import QObject, QThread, QTimer, pyqtSignal
 from PyQt6.QtGui import QAction, QIcon
 from PyQt6.QtWidgets import QMenu, QSystemTrayIcon
+
+_ICON_PATHS = [
+    Path("/usr/share/icons/hicolor/scalable/apps/ctfl.svg"),
+    Path(__file__).resolve().parent.parent / "icons" / "ctfl.svg",
+]
 
 from .autostart import Autostart
 from .config import Config
@@ -13,6 +19,7 @@ from .popup import PopupWidget
 from .providers import UsageData
 from .providers.api import ApiProvider
 from .providers.local import LocalProvider
+from .providers.oauth import OAuthUsageProvider
 from .settings_dialog import SettingsDialog
 
 
@@ -41,6 +48,8 @@ class _FetchWorker(QObject):
                         if m.model not in existing:
                             merged.by_model.append(m)
                             existing.add(m.model)
+                if result.limits:
+                    merged.limits.extend(result.limits)
         if errors and not merged.daily:
             merged.error = "; ".join(errors)
         self.finished.emit(merged)
@@ -54,6 +63,7 @@ class TrayIcon(QSystemTrayIcon):
         autostart: Autostart,
         local_provider: LocalProvider,
         api_provider: ApiProvider,
+        oauth_provider: OAuthUsageProvider,
     ) -> None:
         super().__init__()
         self._config = config
@@ -61,14 +71,20 @@ class TrayIcon(QSystemTrayIcon):
         self._autostart = autostart
         self._local = local_provider
         self._api = api_provider
+        self._oauth = oauth_provider
         self._thread: QThread | None = None
         self._latest_data: UsageData | None = None
 
         icon = QIcon.fromTheme("ctfl")
         if icon.isNull():
+            for path in _ICON_PATHS:
+                if path.exists():
+                    icon = QIcon(str(path))
+                    break
+        if icon.isNull():
             icon = QIcon.fromTheme("utilities-system-monitor")
         self.setIcon(icon)
-        self.setToolTip("ctfl — Claude Usage")
+        self.setToolTip("Claude Tracker For Linux")
 
         self._popup = PopupWidget(config)
         self._popup.refresh_requested.connect(self.refresh)
@@ -87,6 +103,10 @@ class TrayIcon(QSystemTrayIcon):
 
     def _build_menu(self) -> None:
         menu = QMenu()
+        show_action = QAction("Show Usage", menu)
+        show_action.triggered.connect(self._show_popup)
+        menu.addAction(show_action)
+
         refresh_action = QAction("Refresh Now", menu)
         refresh_action.triggered.connect(self.refresh)
         menu.addAction(refresh_action)
@@ -135,12 +155,27 @@ class TrayIcon(QSystemTrayIcon):
     def _on_data(self, data: UsageData) -> None:
         self._latest_data = data
 
-        # Update tooltip
+        # Build rich tooltip
+        from .providers import format_tokens
+        from .popup import _format_reset
+
+        lines = ["Claude Tracker For Linux"]
+
+        # Today's usage right under the title
         today = datetime.now().strftime("%Y-%m-%d")
         today_data = next((d for d in data.daily if d.date == today), None)
         if today_data:
-            from .providers import format_tokens
-            self.setToolTip(f"Claude: {format_tokens(today_data.total_tokens)} tokens today")
+            lines.append(f"Today: {format_tokens(today_data.total_tokens)} tokens")
+
+        # Blank line then rate limits
+        if data.limits:
+            lines.append("")
+            for info in data.limits:
+                reset = _format_reset(info.resets_at)
+                reset_part = f" ({reset.lower()})" if reset else ""
+                lines.append(f"{info.name}: {info.utilization:.0f}%{reset_part}")
+
+        self.setToolTip("\n".join(lines))
 
         if self._popup.isVisible():
             self._popup.update_data(data)
@@ -152,7 +187,14 @@ class TrayIcon(QSystemTrayIcon):
             providers.append(self._local)
         if source in ("api", "both"):
             providers.append(self._api)
+        providers.append(self._oauth)
         return providers
+
+    def _show_popup(self) -> None:
+        self._popup.position_near_tray(self.geometry())
+        if self._latest_data:
+            self._popup.update_data(self._latest_data)
+        self._popup.show()
 
     def _show_settings(self) -> None:
         self._popup.close()
@@ -165,7 +207,10 @@ class TrayIcon(QSystemTrayIcon):
         self.refresh()
 
     def _start_timer(self) -> None:
-        self._timer.start(self._config.refresh_interval * 1000)
+        if self._config.auto_refresh:
+            self._timer.start(self._config.refresh_interval * 1000)
+        else:
+            self._timer.stop()
 
     def _quit(self) -> None:
         from PyQt6.QtWidgets import QApplication

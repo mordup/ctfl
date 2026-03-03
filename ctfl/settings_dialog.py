@@ -33,7 +33,7 @@ class SettingsDialog(QDialog):
         self._config = config
         self._credentials = credentials
         self._autostart = autostart
-        self.setWindowTitle("ctfl Settings")
+        self.setWindowTitle("Claude Tracker For Linux — Settings")
         self.setMinimumWidth(400)
         self._build_ui()
         self._load()
@@ -42,11 +42,11 @@ class SettingsDialog(QDialog):
         layout = QVBoxLayout(self)
 
         # Data source
-        source_group = QGroupBox("Data Source")
+        source_group = QGroupBox("Usage Data Source")
         source_layout = QVBoxLayout(source_group)
         self._source_buttons = QButtonGroup(self)
-        self._rb_local = QRadioButton("Local (Claude Code files)")
-        self._rb_api = QRadioButton("Admin API")
+        self._rb_local = QRadioButton("Local logs (Claude Code conversation files)")
+        self._rb_api = QRadioButton("Admin API (organization usage)")
         self._rb_both = QRadioButton("Both")
         self._source_buttons.addButton(self._rb_local, 0)
         self._source_buttons.addButton(self._rb_api, 1)
@@ -72,12 +72,13 @@ class SettingsDialog(QDialog):
         self._days_spin = QSpinBox()
         self._days_spin.setRange(1, 90)
         display_layout.addRow("Days to show:", self._days_spin)
+        self._auto_refresh_check = QCheckBox("Auto-refresh")
+        display_layout.addRow(self._auto_refresh_check)
         self._refresh_spin = QSpinBox()
         self._refresh_spin.setRange(1, 60)
         self._refresh_spin.setSuffix(" min")
         display_layout.addRow("Refresh interval:", self._refresh_spin)
-        self._cache_check = QCheckBox("Show cache token columns")
-        display_layout.addRow(self._cache_check)
+        self._auto_refresh_check.toggled.connect(self._refresh_spin.setEnabled)
         layout.addWidget(display_group)
 
         # Autostart
@@ -114,8 +115,9 @@ class SettingsDialog(QDialog):
             self._api_key_input.setText(existing_key)
 
         self._days_spin.setValue(self._config.days_to_show)
+        self._auto_refresh_check.setChecked(self._config.auto_refresh)
+        self._refresh_spin.setEnabled(self._config.auto_refresh)
         self._refresh_spin.setValue(self._config.refresh_interval // 60)
-        self._cache_check.setChecked(self._config.show_cache_tokens)
         self._autostart_check.setChecked(self._autostart.is_enabled())
 
         # Trigger initial state
@@ -126,9 +128,9 @@ class SettingsDialog(QDialog):
         self._config.data_source = source_map.get(
             self._source_buttons.checkedId(), "local"
         )
+        self._config.auto_refresh = self._auto_refresh_check.isChecked()
         self._config.refresh_interval = self._refresh_spin.value() * 60
         self._config.days_to_show = self._days_spin.value()
-        self._config.show_cache_tokens = self._cache_check.isChecked()
 
         # API key
         key_text = self._api_key_input.text().strip()

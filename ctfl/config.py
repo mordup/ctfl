@@ -24,8 +24,16 @@ class Config:
         self._s.setValue("data_source", v)
 
     @property
+    def auto_refresh(self) -> bool:
+        return self._get("auto_refresh", True, bool)
+
+    @auto_refresh.setter
+    def auto_refresh(self, v: bool) -> None:
+        self._s.setValue("auto_refresh", v)
+
+    @property
     def refresh_interval(self) -> int:
-        return self._get("refresh_interval", 300, int)
+        return self._get("refresh_interval", 60, int)
 
     @refresh_interval.setter
     def refresh_interval(self, v: int) -> None:
@@ -46,11 +54,3 @@ class Config:
     @days_to_show.setter
     def days_to_show(self, v: int) -> None:
         self._s.setValue("days_to_show", v)
-
-    @property
-    def show_cache_tokens(self) -> bool:
-        return self._get("show_cache_tokens", True, bool)
-
-    @show_cache_tokens.setter
-    def show_cache_tokens(self, v: bool) -> None:
-        self._s.setValue("show_cache_tokens", v)

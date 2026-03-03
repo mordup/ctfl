@@ -44,9 +44,17 @@ class DailyUsage:
 
 
 @dataclass
+class RateLimitInfo:
+    name: str            # "Current session", "Weekly — All models", etc.
+    utilization: float   # 0-100 percentage
+    resets_at: str | None  # ISO 8601 timestamp or None
+
+
+@dataclass
 class UsageData:
     daily: list[DailyUsage] = field(default_factory=list)
     by_model: list[ModelTokens] = field(default_factory=list)
+    limits: list[RateLimitInfo] = field(default_factory=list)
     error: str | None = None
 
 

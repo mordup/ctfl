@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=ctfl
+GenericName=Claude Token Footprint Logger
+Comment=Monitor Claude API token usage from your system tray
+Exec=ctfl
+Icon=ctfl
+Terminal=false
+Categories=Utility;System;Monitor;
+Keywords=claude;tokens;usage;anthropic;

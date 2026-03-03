@@ -11,9 +11,9 @@ echo
 
 mkdir -p dist
 
-# PyPI wheel + sdist
-echo "=== PyPI (wheel + sdist) ==="
-python3 -m build
+# Wheel
+echo "=== Wheel ==="
+python3 -m build --wheel
 echo
 
 # Arch Linux
@@ -40,6 +40,9 @@ fi
 # AppImage
 if command -v python-appimage &>/dev/null; then
     echo "=== AppImage ==="
+    # Point requirements.txt at the local wheel (absolute path for python-appimage)
+    WHEEL_PATH="$(pwd)/dist/ctfl-${VERSION}-py3-none-any.whl"
+    echo "$WHEEL_PATH" > appimage/requirements.txt
     python-appimage build app -p 3.11 appimage/
     # Move AppImage artifacts into dist/
     mv -f ./*.AppImage dist/ 2>/dev/null || true

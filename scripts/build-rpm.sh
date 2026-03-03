@@ -29,7 +29,7 @@ install -Dm644 LICENSE \
     "$DESTDIR/usr/share/licenses/ctfl/LICENSE"
 
 echo "==> Building .rpm with fpm..."
-fpm \
+${FPM:-fpm} \
     -s dir \
     -t rpm \
     -n ctfl \

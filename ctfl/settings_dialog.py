@@ -19,7 +19,7 @@ from PyQt6.QtWidgets import (
 
 from .autostart import Autostart
 from .config import Config
-from .constants import APP_DISPLAY_NAME, ICON_THEME_NAME
+from .constants import ICON_THEME_NAME
 from .credentials import Credentials
 
 
@@ -37,7 +37,7 @@ class SettingsDialog(QDialog):
         self._config = config
         self._credentials = credentials
         self._autostart = autostart
-        self.setWindowTitle(f"{APP_DISPLAY_NAME} — Settings")
+        self.setWindowTitle("Settings")
         self.setWindowIcon(QIcon.fromTheme(ICON_THEME_NAME))
         self.setMinimumWidth(600)
         self._build_ui()
@@ -83,6 +83,8 @@ class SettingsDialog(QDialog):
         self._days_spin = QSpinBox()
         self._days_spin.setRange(1, 90)
         display_layout.addRow("Days to show:", self._days_spin)
+        self._breakdown_check = QCheckBox("Show token breakdown")
+        display_layout.addRow(self._breakdown_check)
         self._auto_refresh_check = QCheckBox("Auto-refresh")
         display_layout.addRow(self._auto_refresh_check)
         self._refresh_spin = QSpinBox()
@@ -162,6 +164,7 @@ class SettingsDialog(QDialog):
             self._api_key_input.setText(existing_key)
 
         self._days_spin.setValue(self._config.days_to_show)
+        self._breakdown_check.setChecked(self._config.show_token_breakdown)
         self._auto_refresh_check.setChecked(self._config.auto_refresh)
         self._refresh_spin.setEnabled(self._config.auto_refresh)
         self._refresh_spin.setValue(self._config.refresh_interval // 60)
@@ -181,6 +184,7 @@ class SettingsDialog(QDialog):
         self._config.data_source = source_map.get(
             self._source_buttons.checkedId(), "local"
         )
+        self._config.show_token_breakdown = self._breakdown_check.isChecked()
         self._config.auto_refresh = self._auto_refresh_check.isChecked()
         self._config.refresh_interval = self._refresh_spin.value() * 60
         self._config.days_to_show = self._days_spin.value()

@@ -85,6 +85,14 @@ class Config:
         self._s.setValue("tooltip_sync", v)
 
     @property
+    def show_token_breakdown(self) -> bool:
+        return self._get("show_token_breakdown", True, bool)
+
+    @show_token_breakdown.setter
+    def show_token_breakdown(self, v: bool) -> None:
+        self._s.setValue("show_token_breakdown", v)
+
+    @property
     def rate_limit_warning(self) -> bool:
         return self._get("rate_limit_warning", True, bool)
 

@@ -1,2 +1,1 @@
-# Overwritten by scripts/release.sh at build time
-ctfl
+/home/morgan/Projects/ctfl/dist/ctfl-2.1.0-py3-none-any.whl

@@ -52,7 +52,7 @@ class ApiProvider:
         cost_url = f"{BASE_URL}/cost?start_date={start}&end_date={end}"
         try:
             cost_data = self._request(cost_url, headers)
-        except Exception:
+        except (HTTPError, URLError, json.JSONDecodeError, OSError):
             cost_data = {}
 
         return self._parse(usage_data, cost_data)

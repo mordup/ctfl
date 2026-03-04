@@ -11,7 +11,7 @@ from .constants import APP_DISPLAY_NAME, APP_NAME, ICON_THEME_NAME
 class AboutDialog(QDialog):
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
-        self.setWindowTitle(f"About {APP_NAME.upper()}")
+        self.setWindowTitle(f"About {APP_DISPLAY_NAME}")
         self.setWindowIcon(QIcon.fromTheme(ICON_THEME_NAME))
         self.setFixedWidth(320)
 
@@ -24,7 +24,7 @@ class AboutDialog(QDialog):
         layout.addWidget(icon_label)
 
         title_label = QLabel(
-            f"<b>{APP_NAME.upper()} — {APP_DISPLAY_NAME}</b><br>v{__version__}"
+            f"<b>{APP_DISPLAY_NAME} — v{__version__}</b>"
         )
         title_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(title_label)

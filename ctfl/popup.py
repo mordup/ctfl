@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime as _dt, timezone as _tz
 
 from PyQt6.QtCore import QEvent, Qt, pyqtSignal
-from PyQt6.QtGui import QIcon
+from PyQt6.QtGui import QFont, QFontMetrics, QIcon
 from PyQt6.QtWidgets import (
     QFrame,
     QHBoxLayout,
@@ -287,12 +287,12 @@ class _BarChartWidget(QWidget):
 
     def set_rows(
         self,
-        rows: list[tuple[str, int, int, str, str | None]],
+        rows: list[tuple[str, int, int, str, BreakdownItems | None]],
     ) -> None:
         """Set bar chart data.
 
         Each row is (label, value, max_value, detail_text, breakdown).
-        breakdown is an optional string shown below the bar.
+        breakdown is a list of (symbol, formatted_value, label, color) tuples, or None.
         """
         # Clear previous rows (keep the trailing stretch)
         while self._layout.count() > 1:
@@ -301,6 +301,21 @@ class _BarChartWidget(QWidget):
                 item.widget().deleteLater()
             elif item.layout():
                 _clear_layout(item.layout())
+
+        # Compute max pixel width for each fixed column position
+        bd_font = QFont()
+        bd_font.setPixelSize(10)
+        fm = QFontMetrics(bd_font)
+        # All category labels in fixed order
+        all_labels = [label for _, label, _ in _BREAKDOWN_CATEGORIES]
+        col_widths: dict[str, int] = {}
+        for *_, breakdown in rows:
+            if not breakdown:
+                continue
+            for symbol, val_text, label, _ in breakdown:
+                text = f"{symbol}{val_text} {label}"
+                w = fm.horizontalAdvance(text)
+                col_widths[label] = max(col_widths.get(label, 0), w)
 
         for label_text, value, max_value, detail_text, breakdown in rows:
             row_widget = QWidget()
@@ -332,13 +347,40 @@ class _BarChartWidget(QWidget):
             bar.setStyleSheet(_PROGRESS_BAR_STYLE)
             row_layout.addWidget(bar)
 
-            # Breakdown line
+            # Breakdown line — fixed column positions
             if breakdown:
-                bd_label = QLabel(breakdown)
-                bd_label.setStyleSheet("color: #888; font-size: 10px;")
-                row_layout.addWidget(bd_label)
+                bd_map = {label: (sym, val, color) for sym, val, label, color in breakdown}
+                bd_row = QHBoxLayout()
+                bd_row.setContentsMargins(0, 0, 0, 0)
+                bd_row.setSpacing(8)
+                for cat_label in all_labels:
+                    if cat_label not in col_widths:
+                        continue  # no row uses this category
+                    w = col_widths[cat_label] + 4
+                    if cat_label in bd_map:
+                        sym, val, color = bd_map[cat_label]
+                        bd_lbl = QLabel(f"{sym}{val} {cat_label}")
+                        bd_lbl.setFont(bd_font)
+                        bd_lbl.setStyleSheet(f"color: {color};")
+                    else:
+                        bd_lbl = QLabel("")
+                    bd_lbl.setFixedWidth(w)
+                    bd_row.addWidget(bd_lbl)
+                bd_row.addStretch()
+                row_layout.addLayout(bd_row)
 
             self._layout.insertWidget(self._layout.count() - 1, row_widget)
+
+
+_BREAKDOWN_CATEGORIES = [
+    ("↓", "in", "#5B9BF6"),
+    ("↑", "out", "#F59E0B"),
+    ("⟳", "cache", "#9B8ECE"),
+    ("✦", "new cache", "#6366F1"),
+]
+
+# Each entry: (symbol, formatted_value, label, color) — only non-zero categories
+BreakdownItems = list[tuple[str, str, str, str]]
 
 
 def _format_breakdown(
@@ -346,20 +388,14 @@ def _format_breakdown(
     output_tokens: int,
     cache_read_tokens: int,
     cache_creation_tokens: int,
-) -> str | None:
-    """Format token breakdown as HTML with colored symbols, omitting zero categories."""
-    parts = []
-    for symbol, label, value, color in [
-        ("↓", "in", input_tokens, "#5B9BF6"),
-        ("↑", "out", output_tokens, "#F59E0B"),
-        ("⟳", "cache", cache_read_tokens, "#9B8ECE"),
-        ("✦", "new cache", cache_creation_tokens, "#6366F1"),
-    ]:
+) -> BreakdownItems | None:
+    """Return structured breakdown items for non-zero token categories."""
+    values = [input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens]
+    items = []
+    for (symbol, label, color), value in zip(_BREAKDOWN_CATEGORIES, values):
         if value:
-            parts.append(
-                f"<span style='color:{color}'>{symbol}{format_tokens(value)} {label}</span>"
-            )
-    return "&nbsp; ".join(parts) if parts else None
+            items.append((symbol, format_tokens(value), label, color))
+    return items or None
 
 
 def _clear_layout(layout) -> None:

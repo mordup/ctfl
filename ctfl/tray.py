@@ -205,9 +205,7 @@ class TrayIcon(QSystemTrayIcon):
         lines = [APP_DISPLAY_NAME]
 
         plan = read_plan_name()
-        if plan:
-            lines.append(plan)
-
+        today_line = None
         if self._config.tooltip_today:
             today = datetime.now().strftime(DATE_FMT_ISO)
             today_data = next((d for d in data.daily if d.date == today), None)
@@ -215,7 +213,13 @@ class TrayIcon(QSystemTrayIcon):
                 today_line = f"Today: {format_tokens(today_data.total_tokens)} tokens"
                 if today_data.cost_usd is not None:
                     today_line += f" · {format_cost(today_data.cost_usd)}"
-                lines.append(today_line)
+
+        if plan and today_line:
+            lines.append(f"{plan} — {today_line}")
+        elif plan:
+            lines.append(plan)
+        elif today_line:
+            lines.append(today_line)
 
         if self._config.tooltip_limits and data.limits:
             lines.append("")

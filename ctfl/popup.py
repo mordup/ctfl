@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime as _dt, timezone as _tz
 
-from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtCore import QEvent, Qt, pyqtSignal
 from PyQt6.QtGui import QIcon
 from PyQt6.QtWidgets import (
     QFrame,
@@ -117,6 +117,7 @@ class PopupWidget(QWidget):
         self._summary_label.setText(html)
 
         # Daily bar chart
+        show_bd = self._config.show_token_breakdown
         max_day_tokens = max((d.total_tokens for d in data.daily), default=1) or 1
         daily_rows = []
         for day in data.daily:
@@ -128,7 +129,11 @@ class PopupWidget(QWidget):
             detail = f"{format_tokens(day.total_tokens)} tokens"
             if day.cost_usd is not None:
                 detail += f" · {format_cost(day.cost_usd)}"
-            daily_rows.append((label, day.total_tokens, max_day_tokens, detail))
+            breakdown = _format_breakdown(
+                day.input_tokens, day.output_tokens,
+                day.cache_read_tokens, day.cache_creation_tokens,
+            ) if show_bd else None
+            daily_rows.append((label, day.total_tokens, max_day_tokens, detail, breakdown))
         self._daily_chart.set_rows(daily_rows)
 
         # Model bar chart
@@ -137,16 +142,20 @@ class PopupWidget(QWidget):
         for mt in data.by_model:
             label = _short_model(mt.model)
             detail = format_tokens(mt.total)
-            model_rows.append((label, mt.total, max_model_total, detail))
+            breakdown = _format_breakdown(
+                mt.input_tokens, mt.output_tokens,
+                mt.cache_read_tokens, mt.cache_creation_tokens,
+            ) if show_bd else None
+            model_rows.append((label, mt.total, max_model_total, detail, breakdown))
         self._model_chart.set_rows(model_rows)
 
-        # Project bar chart
+        # Project bar chart (no token breakdown available)
         if data.by_project:
             max_project = max(p.total_tokens for p in data.by_project) or 1
             project_rows = []
             for proj in data.by_project:
                 detail = format_tokens(proj.total_tokens)
-                project_rows.append((proj.name, proj.total_tokens, max_project, detail))
+                project_rows.append((proj.name, proj.total_tokens, max_project, detail, None))
             self._project_chart.set_rows(project_rows)
         else:
             self._project_chart.set_rows([])
@@ -260,6 +269,11 @@ class PopupWidget(QWidget):
 
         self.move(x, y)
 
+    def changeEvent(self, event: QEvent) -> None:
+        if event.type() == QEvent.Type.ActivationChange and not self.isActiveWindow():
+            self.hide()
+        super().changeEvent(event)
+
 
 class _BarChartWidget(QWidget):
     """List of horizontal bar-chart rows."""
@@ -271,8 +285,15 @@ class _BarChartWidget(QWidget):
         self._layout.setSpacing(6)
         self._layout.addStretch()
 
-    def set_rows(self, rows: list[tuple[str, int, int, str]]) -> None:
-        """Set bar chart data. Each row is (label, value, max_value, detail_text)."""
+    def set_rows(
+        self,
+        rows: list[tuple[str, int, int, str, str | None]],
+    ) -> None:
+        """Set bar chart data.
+
+        Each row is (label, value, max_value, detail_text, breakdown).
+        breakdown is an optional string shown below the bar.
+        """
         # Clear previous rows (keep the trailing stretch)
         while self._layout.count() > 1:
             item = self._layout.takeAt(0)
@@ -281,7 +302,7 @@ class _BarChartWidget(QWidget):
             elif item.layout():
                 _clear_layout(item.layout())
 
-        for label_text, value, max_value, detail_text in rows:
+        for label_text, value, max_value, detail_text, breakdown in rows:
             row_widget = QWidget()
             row_layout = QVBoxLayout(row_widget)
             row_layout.setContentsMargins(0, 0, 0, 0)
@@ -311,7 +332,34 @@ class _BarChartWidget(QWidget):
             bar.setStyleSheet(_PROGRESS_BAR_STYLE)
             row_layout.addWidget(bar)
 
+            # Breakdown line
+            if breakdown:
+                bd_label = QLabel(breakdown)
+                bd_label.setStyleSheet("color: #888; font-size: 10px;")
+                row_layout.addWidget(bd_label)
+
             self._layout.insertWidget(self._layout.count() - 1, row_widget)
+
+
+def _format_breakdown(
+    input_tokens: int,
+    output_tokens: int,
+    cache_read_tokens: int,
+    cache_creation_tokens: int,
+) -> str | None:
+    """Format token breakdown as HTML with colored symbols, omitting zero categories."""
+    parts = []
+    for symbol, label, value, color in [
+        ("↓", "in", input_tokens, "#5B9BF6"),
+        ("↑", "out", output_tokens, "#F59E0B"),
+        ("⟳", "cache", cache_read_tokens, "#9B8ECE"),
+        ("✦", "new cache", cache_creation_tokens, "#6366F1"),
+    ]:
+        if value:
+            parts.append(
+                f"<span style='color:{color}'>{symbol}{format_tokens(value)} {label}</span>"
+            )
+    return "&nbsp; ".join(parts) if parts else None
 
 
 def _clear_layout(layout) -> None:

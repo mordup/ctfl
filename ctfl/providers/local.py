@@ -281,8 +281,8 @@ class LocalProvider:
                     if not ts:
                         continue
                     try:
-                        date_str = ts[:10]  # "2026-03-03" from ISO timestamp
-                    except (IndexError, TypeError):
+                        date_str = datetime.fromisoformat(ts).astimezone().strftime(DATE_FMT_ISO)
+                    except (ValueError, TypeError):
                         continue
                     records.append({
                         "date": date_str,

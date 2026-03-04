@@ -17,6 +17,30 @@ _KEY_LABELS = {
 }
 
 
+_PLAN_LABELS = {
+    "pro": "Pro",
+    "max": "Max 5x",
+    "max_20x": "Max 20x",
+}
+
+
+def read_plan_name() -> str | None:
+    """Read the short plan name from Claude credentials."""
+    if not CREDENTIALS_FILE.exists():
+        return None
+    try:
+        with open(CREDENTIALS_FILE) as f:
+            data = json.load(f)
+        oauth = data.get("claudeAiOauth", {})
+        tier = oauth.get("rateLimitTier", "")
+        if "max_20x" in tier:
+            return _PLAN_LABELS["max_20x"]
+        sub_type = oauth.get("subscriptionType", "")
+        return _PLAN_LABELS.get(sub_type)
+    except (json.JSONDecodeError, OSError):
+        return None
+
+
 class OAuthUsageProvider:
     def fetch(self, days: int = 0) -> UsageData:
         try:

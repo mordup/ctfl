@@ -222,11 +222,16 @@ class TrayIcon(QSystemTrayIcon):
             lines.append(today_line)
 
         if self._config.tooltip_limits and data.limits:
+            from .providers.prediction import predict_exhaustion
             lines.append("")
             for info in data.limits:
                 reset = _format_reset(info.resets_at)
                 reset_part = f" ({reset.lower()})" if reset else ""
-                lines.append(f"{info.name}: {info.utilization:.0f}%{reset_part}")
+                line = f"{info.name}: {info.utilization:.0f}%{reset_part}"
+                pred = predict_exhaustion(info, info.window_key)
+                if pred:
+                    line += f" — {pred}"
+                lines.append(line)
 
         if self._config.tooltip_sync:
             lines.append("")

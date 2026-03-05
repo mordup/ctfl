@@ -4,9 +4,13 @@ import json
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from . import DailyUsage, ModelTokens, ProjectUsage, UsageData
 from ..constants import DATE_FMT_ISO
+
+if TYPE_CHECKING:
+    from ..config import Config
 
 CLAUDE_DIR = Path.home() / ".claude"
 STATS_FILE = CLAUDE_DIR / "stats-cache.json"
@@ -51,9 +55,10 @@ _MAX_CACHE_ENTRIES = 200
 
 
 class LocalProvider:
-    def __init__(self) -> None:
+    def __init__(self, config: Config | None = None) -> None:
         # Cache parsed JSONL keyed by (filepath, mtime) -> list of parsed records
         self._file_cache: dict[tuple[str, float], list[dict]] = {}
+        self._config = config
 
     def fetch(self, days: int) -> UsageData:
         try:
@@ -115,7 +120,9 @@ class LocalProvider:
             )
 
         # Scan JSONL files for data after cache cutoff
-        jsonl_daily, jsonl_models, by_project = self._scan_jsonl_files(cache_cutoff, cutoff_date)
+        jsonl_daily, jsonl_models, by_project, daily_model_tokens = self._scan_jsonl_files(
+            cache_cutoff, cutoff_date
+        )
 
         # JSONL data takes precedence for overlapping dates
         for date_str, day in jsonl_daily.items():
@@ -131,6 +138,15 @@ class LocalProvider:
                 mt.cache_creation_tokens += tokens.cache_creation_tokens
             else:
                 model_totals[model] = tokens
+
+        # Estimate costs from per-model token data when enabled
+        if self._config and self._config.estimate_costs and daily_model_tokens:
+            from .pricing import estimate_daily_cost
+            for date_str, model_map in daily_model_tokens.items():
+                if date_str in daily_map and daily_map[date_str].cost_usd is None:
+                    cost = estimate_daily_cost(model_map)
+                    if cost is not None:
+                        daily_map[date_str].cost_usd = cost
 
         # Sort daily by date descending, filter to requested range
         daily_list = sorted(daily_map.values(), key=lambda d: d.date, reverse=True)
@@ -153,16 +169,21 @@ class LocalProvider:
 
     def _scan_jsonl_files(
         self, cache_cutoff: str, cutoff_date: str
-    ) -> tuple[dict[str, DailyUsage], dict[str, ModelTokens], list[ProjectUsage]]:
+    ) -> tuple[dict[str, DailyUsage], dict[str, ModelTokens], list[ProjectUsage],
+               dict[str, dict[str, tuple[int, int, int, int]]]]:
         daily_map: dict[str, DailyUsage] = {}
         model_totals: dict[str, ModelTokens] = defaultdict(
             lambda: ModelTokens(model="")
         )
         session_dates: dict[str, set[str]] = defaultdict(set)
         project_agg: dict[str, dict] = {}  # project_dir -> {tokens, messages}
+        # Per-day per-model token breakdown for cost estimation
+        daily_model_tokens: dict[str, dict[str, list[int]]] = defaultdict(
+            lambda: defaultdict(lambda: [0, 0, 0, 0])
+        )
 
         if not PROJECTS_DIR.exists():
-            return daily_map, dict(model_totals), []
+            return daily_map, dict(model_totals), [], {}
 
         # Find all JSONL files, filter by mtime for performance
         if cache_cutoff:
@@ -223,6 +244,13 @@ class LocalProvider:
                 mt.cache_read_tokens += rec["cache_read"]
                 mt.cache_creation_tokens += rec["cache_creation"]
 
+                # Per-day per-model tokens for cost estimation
+                dmt = daily_model_tokens[date_str][model]
+                dmt[0] += rec["input_tokens"]
+                dmt[1] += rec["output_tokens"]
+                dmt[2] += rec["cache_read"]
+                dmt[3] += rec["cache_creation"]
+
                 # Aggregate per-project
                 if project_dir:
                     if project_dir not in project_agg:
@@ -246,7 +274,12 @@ class LocalProvider:
             ))
         projects.sort(key=lambda p: p.total_tokens, reverse=True)
 
-        return daily_map, dict(model_totals), projects
+        # Convert daily_model_tokens lists to tuples
+        dmt_out: dict[str, dict[str, tuple[int, int, int, int]]] = {
+            date: {m: tuple(v) for m, v in models.items()}  # type: ignore[misc]
+            for date, models in daily_model_tokens.items()
+        }
+        return daily_map, dict(model_totals), projects, dmt_out
 
     def _parse_jsonl(self, filepath: Path) -> list[dict]:
         try:

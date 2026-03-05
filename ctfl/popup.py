@@ -189,6 +189,8 @@ class PopupWidget(QWidget):
         section_label.setFont(font)
         self._limits_layout.addWidget(section_label)
 
+        from .providers.prediction import predict_exhaustion
+
         for info in limits:
             reset_text = _format_reset(info.resets_at)
             text = info.name
@@ -210,6 +212,12 @@ class PopupWidget(QWidget):
             bar_row.addWidget(bar, 1)
             bar_row.addWidget(pct_label)
             self._limits_layout.addLayout(bar_row)
+
+            pred = predict_exhaustion(info, info.window_key)
+            if pred:
+                pred_label = QLabel(pred)
+                pred_label.setStyleSheet("color: gray; font-size: 11px;")
+                self._limits_layout.addWidget(pred_label)
 
         # Separator line
         sep = QFrame()

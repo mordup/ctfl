@@ -107,3 +107,11 @@ class Config:
     @rate_limit_threshold.setter
     def rate_limit_threshold(self, v: int) -> None:
         self._s.setValue("rate_limit_threshold", v)
+
+    @property
+    def estimate_costs(self) -> bool:
+        return self._get("estimate_costs", False, bool)
+
+    @estimate_costs.setter
+    def estimate_costs(self, v: bool) -> None:
+        self._s.setValue("estimate_costs", v)

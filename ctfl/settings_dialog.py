@@ -10,6 +10,7 @@ from PyQt6.QtWidgets import (
     QFormLayout,
     QGroupBox,
     QHBoxLayout,
+    QLabel,
     QLineEdit,
     QMessageBox,
     QRadioButton,
@@ -85,6 +86,8 @@ class SettingsDialog(QDialog):
         display_layout.addRow("Days to show:", self._days_spin)
         self._breakdown_check = QCheckBox("Show token breakdown")
         display_layout.addRow(self._breakdown_check)
+        self._estimate_costs_check = QCheckBox("Estimate costs from local data")
+        display_layout.addRow(self._estimate_costs_check)
         self._auto_refresh_check = QCheckBox("Auto-refresh")
         display_layout.addRow(self._auto_refresh_check)
         self._refresh_spin = QSpinBox()
@@ -97,6 +100,22 @@ class SettingsDialog(QDialog):
         left.addStretch()
 
         # --- Right column ---
+
+        # Session key (for rate limits)
+        session_group = QGroupBox("Rate Limits (claude.ai)")
+        session_layout = QFormLayout(session_group)
+        self._session_key_input = QLineEdit()
+        self._session_key_input.setEchoMode(QLineEdit.EchoMode.Password)
+        self._session_key_input.setPlaceholderText("sk-ant-sid...")
+        session_layout.addRow("Session Key:", self._session_key_input)
+        self._cf_clearance_input = QLineEdit()
+        self._cf_clearance_input.setEchoMode(QLineEdit.EchoMode.Password)
+        self._cf_clearance_input.setPlaceholderText("cf_clearance value")
+        session_layout.addRow("CF Clearance:", self._cf_clearance_input)
+        hint = QLabel("From claude.ai → DevTools → Cookies")
+        hint.setStyleSheet("color: gray; font-size: 11px;")
+        session_layout.addRow(hint)
+        right.addWidget(session_group)
 
         # Tooltip
         tooltip_group = QGroupBox("Tooltip Info")
@@ -163,8 +182,16 @@ class SettingsDialog(QDialog):
         if existing_key:
             self._api_key_input.setText(existing_key)
 
+        existing_session = self._credentials.get_session_key()
+        if existing_session:
+            self._session_key_input.setText(existing_session)
+        existing_cf = self._credentials.get_cf_clearance()
+        if existing_cf:
+            self._cf_clearance_input.setText(existing_cf)
+
         self._days_spin.setValue(self._config.days_to_show)
         self._breakdown_check.setChecked(self._config.show_token_breakdown)
+        self._estimate_costs_check.setChecked(self._config.estimate_costs)
         self._auto_refresh_check.setChecked(self._config.auto_refresh)
         self._refresh_spin.setEnabled(self._config.auto_refresh)
         self._refresh_spin.setValue(self._config.refresh_interval // 60)
@@ -185,6 +212,7 @@ class SettingsDialog(QDialog):
             self._source_buttons.checkedId(), "local"
         )
         self._config.show_token_breakdown = self._breakdown_check.isChecked()
+        self._config.estimate_costs = self._estimate_costs_check.isChecked()
         self._config.auto_refresh = self._auto_refresh_check.isChecked()
         self._config.refresh_interval = self._refresh_spin.value() * 60
         self._config.days_to_show = self._days_spin.value()
@@ -207,6 +235,22 @@ class SettingsDialog(QDialog):
                 pass  # don't delete key just because field is empty on local mode
             else:
                 self._credentials.delete_api_key()
+        except Exception as e:
+            QMessageBox.warning(self, "Error", str(e))
+            return
+
+        # Session key + cf_clearance
+        session_text = self._session_key_input.text().strip()
+        cf_text = self._cf_clearance_input.text().strip()
+        try:
+            if session_text:
+                self._credentials.set_session_key(session_text)
+            else:
+                self._credentials.delete_session_key()
+            if cf_text:
+                self._credentials.set_cf_clearance(cf_text)
+            else:
+                self._credentials.delete_cf_clearance()
         except Exception as e:
             QMessageBox.warning(self, "Error", str(e))
             return

@@ -52,6 +52,7 @@ class RateLimitInfo:
     name: str            # "Current session", "Weekly — All models", etc.
     utilization: float   # 0-100 percentage
     resets_at: str | None  # ISO 8601 timestamp or None
+    window_key: str = ""  # "five_hour", "seven_day", etc.
 
 
 @dataclass

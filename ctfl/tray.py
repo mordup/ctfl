@@ -8,6 +8,7 @@ from PyQt6.QtCore import QObject, QThread, QTimer, pyqtSignal
 from PyQt6.QtGui import QAction, QIcon
 from PyQt6.QtWidgets import QMenu, QSystemTrayIcon
 
+from . import __version__
 from .autostart import Autostart
 from .config import Config
 from .constants import (
@@ -30,6 +31,27 @@ _ICON_PATHS = [
     Path(__file__).resolve().parent / "icons" / f"{ICON_THEME_NAME}.svg",      # bundled in package
     Path(__file__).resolve().parent.parent / "icons" / f"{ICON_THEME_NAME}.svg",  # dev layout
 ]
+
+
+class _UpdateCheckWorker(QObject):
+    finished = pyqtSignal(object)  # dict or None
+
+    def run(self) -> None:
+        from .updater import check_for_update
+        self.finished.emit(check_for_update())
+
+
+class _UpdateApplyWorker(QObject):
+    finished = pyqtSignal(str)  # error message or empty string on success
+
+    def __init__(self, release: dict) -> None:
+        super().__init__()
+        self._release = release
+
+    def run(self) -> None:
+        from .updater import apply_update
+        err = apply_update(self._release)
+        self.finished.emit(err or "")
 
 
 class _FetchWorker(QObject):
@@ -90,7 +112,9 @@ class TrayIcon(QSystemTrayIcon):
         self._api = api_provider
         self._oauth = oauth_provider
         self._thread: QThread | None = None
+        self._update_thread: QThread | None = None
         self._latest_data: UsageData | None = None
+        self._pending_release: dict | None = None
         self._warned_limits: set[str] = set()
 
         icon = QIcon.fromTheme(ICON_THEME_NAME)
@@ -119,6 +143,9 @@ class TrayIcon(QSystemTrayIcon):
         # Initial fetch
         self.refresh()
 
+        # Check for updates after a short delay
+        QTimer.singleShot(5000, self._check_for_updates)
+
     def _build_menu(self) -> None:
         menu = QMenu()
         refresh_action = QAction("Refresh Now", menu)
@@ -128,6 +155,10 @@ class TrayIcon(QSystemTrayIcon):
         settings_action = QAction("Settings", menu)
         settings_action.triggered.connect(self._show_settings)
         menu.addAction(settings_action)
+
+        self._update_action = QAction("Check for Updates", menu)
+        self._update_action.triggered.connect(self._on_update_action)
+        menu.addAction(self._update_action)
 
         menu.addSeparator()
 
@@ -266,6 +297,134 @@ class TrayIcon(QSystemTrayIcon):
         if self._config.tooltip_limits or self._config.rate_limit_warning:
             providers.append(self._oauth)
         return providers
+
+    def _check_for_updates(self) -> None:
+        if self._update_thread is not None and self._update_thread.isRunning():
+            return
+        thread = QThread()
+        worker = _UpdateCheckWorker()
+        worker.moveToThread(thread)
+        thread.started.connect(worker.run)
+        worker.finished.connect(self._on_update_check_done)
+        worker.finished.connect(thread.quit)
+        thread.finished.connect(lambda: self._on_update_thread_finished(thread))
+        self._update_thread = thread
+        self._update_worker = worker
+        thread.start()
+
+    def _on_update_thread_finished(self, thread: QThread) -> None:
+        thread.deleteLater()
+        if self._update_thread is thread:
+            self._update_thread = None
+            self._update_worker = None
+
+    def _on_update_check_done(self, release) -> None:
+        if release is None:
+            if getattr(self, "_manual_update_check", False):
+                self._manual_update_check = False
+                self._update_action.setText("Check for Updates")
+                self._update_action.setEnabled(True)
+                self.showMessage(
+                    APP_DISPLAY_NAME,
+                    "You're on the latest version",
+                    QSystemTrayIcon.MessageIcon.Information,
+                    3000,
+                )
+            return
+        self._manual_update_check = False
+        self._pending_release = release
+        version = release["version"]
+        self._update_action.setText(f"Update to v{version}")
+        self.showMessage(
+            APP_DISPLAY_NAME,
+            f"v{version} is available",
+            QSystemTrayIcon.MessageIcon.Information,
+            5000,
+        )
+
+    def _on_update_action(self) -> None:
+        if self._pending_release:
+            self._show_update_dialog(self._pending_release)
+        else:
+            self._update_action.setText("Checking...")
+            self._update_action.setEnabled(False)
+            self._manual_update_check = True
+            self._check_for_updates()
+            # Re-enable after check completes via a connection
+            QTimer.singleShot(10000, self._reset_update_action)
+
+    def _reset_update_action(self) -> None:
+        if not self._pending_release:
+            self._update_action.setText("Check for Updates")
+            self._update_action.setEnabled(True)
+
+    def _show_update_dialog(self, release: dict) -> None:
+        from .updater import can_auto_update, detect_install_method, InstallMethod
+        from PyQt6.QtWidgets import QMessageBox
+
+        version = release["version"]
+        method = detect_install_method()
+
+        if can_auto_update():
+            method_name = "pip" if method == InstallMethod.PIP else "AppImage"
+            reply = QMessageBox.question(
+                None,
+                f"Update to v{version}",
+                f"CTFL v{version} is available (you have v{__version__}).\n\n"
+                f"Install method: {method_name}\n"
+                f"Update and restart now?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            )
+            if reply == QMessageBox.StandardButton.Yes:
+                self._apply_update(release)
+        else:
+            from PyQt6.QtGui import QDesktopServices
+            from PyQt6.QtCore import QUrl
+            reply = QMessageBox.information(
+                None,
+                f"Update to v{version}",
+                f"CTFL v{version} is available (you have v{__version__}).\n\n"
+                f"Auto-update is not available for system package installs.\n"
+                f"Open the release page to download?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            )
+            if reply == QMessageBox.StandardButton.Yes:
+                QDesktopServices.openUrl(QUrl(release["url"]))
+
+    def _apply_update(self, release: dict) -> None:
+        from PyQt6.QtWidgets import QMessageBox
+
+        self._update_action.setText("Updating...")
+        self._update_action.setEnabled(False)
+
+        thread = QThread()
+        worker = _UpdateApplyWorker(release)
+        worker.moveToThread(thread)
+        thread.started.connect(worker.run)
+        worker.finished.connect(self._on_update_applied)
+        worker.finished.connect(thread.quit)
+        thread.finished.connect(lambda: self._on_update_thread_finished(thread))
+        self._update_thread = thread
+        self._update_worker = worker
+        thread.start()
+
+    def _on_update_applied(self, error: str) -> None:
+        from PyQt6.QtWidgets import QMessageBox
+
+        if error:
+            QMessageBox.warning(None, "Update Failed", error)
+            self._update_action.setText(f"Update to v{self._pending_release['version']}")
+            self._update_action.setEnabled(True)
+        else:
+            reply = QMessageBox.information(
+                None,
+                "Update Complete",
+                f"CTFL has been updated to v{self._pending_release['version']}.\n"
+                f"Restart now to use the new version?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            )
+            if reply == QMessageBox.StandardButton.Yes:
+                self._restart()
 
     def _show_about(self) -> None:
         from .about_dialog import AboutDialog

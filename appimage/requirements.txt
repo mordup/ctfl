@@ -1,1 +1,1 @@
-/home/morgan/Projects/ctfl/dist/ctfl-2.2.4-py3-none-any.whl
+/home/morgan/Projects/ctfl/dist/ctfl-2.3.0-py3-none-any.whl

@@ -1,4 +1,4 @@
 """Claude Tracker For Linux"""
 
-__version__ = "2.2.0"
-__changelog__ = "Session key auth for rate limits, burn rate predictions, cost estimation"
+__version__ = "2.2.1"
+__changelog__ = "Auto-refresh expired OAuth tokens"

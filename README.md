@@ -105,6 +105,18 @@ Configure the data source and API key in **Settings**.
   <img src="screenshots/settings.png" width="480" alt="Settings dialog">
 </p>
 
+## Updating
+
+CTFL can check for new releases automatically (configurable in **Settings → Check for updates**).
+
+| Install method | Update behavior |
+|---|---|
+| **pip** | Auto-updates in place and restarts |
+| **AppImage** | Auto-updates in place and restarts |
+| **System package** (deb/rpm/pacman) | Opens the release page to download the new package |
+
+You can also check manually from the tray menu via **Check for Updates**.
+
 ## Compatibility
 
 Works on any Linux desktop environment with system tray support:

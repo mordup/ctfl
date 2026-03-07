@@ -88,7 +88,7 @@ def _parse_limits(data: dict) -> list[RateLimitInfo]:
             continue
         limits.append(RateLimitInfo(
             name=label,
-            utilization=utilization * 100,
+            utilization=utilization,
             resets_at=entry.get("resets_at"),
             window_key=key,
         ))

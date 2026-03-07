@@ -74,3 +74,30 @@ class UsageData:
 
 class UsageProvider(Protocol):
     def fetch(self, days: int) -> UsageData: ...
+
+
+def format_reset(resets_at: str | None) -> str:
+    from datetime import datetime, timezone
+
+    if not resets_at:
+        return ""
+    try:
+        reset_time = datetime.fromisoformat(resets_at)
+        now = datetime.now(timezone.utc)
+        delta = reset_time - now
+        total_seconds = int(delta.total_seconds())
+        if total_seconds <= 0:
+            return "Resets soon"
+        if total_seconds < 60:
+            return "Resets in <1 min"
+        if total_seconds < 3600:
+            return f"Resets in {total_seconds // 60} min"
+        hours = total_seconds // 3600
+        minutes = (total_seconds % 3600) // 60
+        if hours < 24:
+            return f"Resets in {hours} hr {minutes} min"
+        from ..constants import DATETIME_FMT_WEEKDAY
+        local_time = reset_time.astimezone()
+        return f"Resets {local_time.strftime(DATETIME_FMT_WEEKDAY)}"
+    except (ValueError, TypeError):
+        return ""

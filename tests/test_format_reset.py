@@ -1,6 +1,6 @@
 from datetime import datetime, timedelta, timezone
 
-from ctfl.popup import _format_reset
+from ctfl.providers import format_reset as _format_reset
 
 
 def test_none():

@@ -203,7 +203,7 @@ class PopupWidget(QWidget):
             bar_row.setSpacing(8)
             bar = QProgressBar()
             bar.setRange(0, 100)
-            bar.setValue(min(int(info.utilization), 100))
+            bar.setValue(int(info.utilization))
             bar.setTextVisible(False)
             bar.setFixedHeight(10)
             bar.setStyleSheet(_PROGRESS_BAR_STYLE)

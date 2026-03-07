@@ -1,6 +1,6 @@
 # Maintainer: Morgan <morgan@example.com>
 pkgname=ctfl
-pkgver=2.2.3
+pkgver=2.2.4
 pkgrel=1
 pkgdesc="Claude Tracker For Linux — system tray monitor for Claude usage"
 arch=('any')

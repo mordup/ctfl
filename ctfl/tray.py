@@ -143,8 +143,14 @@ class TrayIcon(QSystemTrayIcon):
         # Initial fetch
         self.refresh()
 
-        # Check for updates after a short delay
-        QTimer.singleShot(5000, self._check_for_updates)
+        # Periodic update checks
+        self._update_timer = QTimer()
+        self._update_timer.timeout.connect(self._check_for_updates)
+        self._start_update_timer()
+
+        # Initial check after short delay
+        if self._config.update_check_interval > 0:
+            QTimer.singleShot(5000, self._check_for_updates)
 
     def _build_menu(self) -> None:
         menu = QMenu()
@@ -334,12 +340,22 @@ class TrayIcon(QSystemTrayIcon):
         self._pending_release = release
         version = release["version"]
         self._update_action.setText(f"Update to v{version}")
-        self.showMessage(
-            APP_DISPLAY_NAME,
-            f"v{version} is available",
-            QSystemTrayIcon.MessageIcon.Information,
-            5000,
-        )
+
+        from .updater import can_auto_update
+        if can_auto_update():
+            self.showMessage(
+                APP_DISPLAY_NAME,
+                f"v{version} is available — click 'Update to v{version}' in the menu to install",
+                QSystemTrayIcon.MessageIcon.Information,
+                5000,
+            )
+        else:
+            self.showMessage(
+                APP_DISPLAY_NAME,
+                f"v{version} is available — visit the release page to download",
+                QSystemTrayIcon.MessageIcon.Information,
+                5000,
+            )
 
     def _on_update_action(self) -> None:
         if self._pending_release:
@@ -437,6 +453,7 @@ class TrayIcon(QSystemTrayIcon):
 
     def _on_settings_changed(self) -> None:
         self._start_timer()
+        self._start_update_timer()
         self.refresh()
 
     def _start_timer(self) -> None:
@@ -444,6 +461,13 @@ class TrayIcon(QSystemTrayIcon):
             self._timer.start(self._config.refresh_interval * 1000)
         else:
             self._timer.stop()
+
+    def _start_update_timer(self) -> None:
+        hours = self._config.update_check_interval
+        if hours > 0:
+            self._update_timer.start(hours * 3600 * 1000)
+        else:
+            self._update_timer.stop()
 
     def _cleanup_thread(self) -> None:
         if self._thread is None or not self._thread.isRunning():

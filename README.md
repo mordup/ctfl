@@ -14,16 +14,19 @@
 
 ## Features
 
-- **System tray icon** with a configurable tooltip showing today's token count, rate limits, and last sync time
-- **Usage popup** with daily, per-model, and per-project token breakdowns displayed as bar charts
-- **Cost tracking** — see daily and total costs alongside token counts (Admin API)
-- **Plan usage limits** — see current session and weekly utilization with reset countdowns
-- **Rate limit alerts** — desktop notifications when usage nears the limit
-- **Per-project breakdown** — token usage grouped by Claude Code project
-- **Multiple data sources** — read from local Claude Code conversation logs, the Anthropic Admin API, or both
-- **Auto-refresh** on a configurable interval
-- **Autostart** on login
-- **Restart** from the tray menu without manually relaunching
+### Usage Monitoring
+- **Daily, per-model, and per-project** token breakdowns displayed as bar charts
+- **Cost tracking** — daily and total costs alongside token counts (Admin API)
+- **Multiple data sources** — local Claude Code logs, Anthropic Admin API, or both
+
+### Rate Limits
+- **Live utilization** — session and weekly usage with reset countdowns
+- **Desktop alerts** — notifications when usage nears the limit
+
+### System Integration
+- **System tray** with a configurable tooltip (today's tokens, limits, sync time)
+- **Auto-refresh** and **autostart** on login
+- **Built-in updater** — checks for new releases and can auto-update (pip / AppImage)
 
 <p align="center">
   <img src="screenshots/usage_daily.png" width="380" alt="Daily usage view">

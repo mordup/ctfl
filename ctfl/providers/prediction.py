@@ -11,6 +11,7 @@ _WINDOW_HOURS: dict[str, float] = {
     "five_hour": 5,
     "seven_day": 168,
     "seven_day_opus": 168,
+    "seven_day_sonnet": 168,
 }
 
 

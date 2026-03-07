@@ -198,9 +198,8 @@ class TrayIcon(QSystemTrayIcon):
             self._popup.update_data(data)
 
     def _update_tooltip(self, data: UsageData) -> None:
-        from .providers import format_cost, format_tokens
+        from .providers import format_cost, format_reset, format_tokens
         from .providers.oauth import read_plan_name
-        from .popup import _format_reset
 
         lines = [APP_DISPLAY_NAME]
 
@@ -225,7 +224,7 @@ class TrayIcon(QSystemTrayIcon):
             from .providers.prediction import predict_exhaustion
             lines.append("")
             for info in data.limits:
-                reset = _format_reset(info.resets_at)
+                reset = format_reset(info.resets_at)
                 reset_part = f" ({reset.lower()})" if reset else ""
                 line = f"{info.name}: {info.utilization:.0f}%{reset_part}"
                 pred = predict_exhaustion(info, info.window_key)

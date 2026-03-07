@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import time
 from pathlib import Path
 from typing import Callable
@@ -87,7 +88,7 @@ def _parse_limits(data: dict) -> list[RateLimitInfo]:
             continue
         limits.append(RateLimitInfo(
             name=label,
-            utilization=utilization,
+            utilization=utilization * 100,
             resets_at=entry.get("resets_at"),
             window_key=key,
         ))
@@ -207,7 +208,13 @@ class OAuthUsageProvider:
             if org_info and org_info.get("uuid"):
                 _save_org_id(org_info["uuid"])
             creds_data["claudeAiOauth"] = oauth
-            CREDENTIALS_FILE.write_text(json.dumps(creds_data, indent=2))
+            tmp = CREDENTIALS_FILE.with_suffix(".tmp")
+            fd = os.open(str(tmp), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+            try:
+                os.write(fd, json.dumps(creds_data, indent=2).encode())
+            finally:
+                os.close(fd)
+            tmp.rename(CREDENTIALS_FILE)
             return new_token
         except (HTTPError, URLError, OSError, json.JSONDecodeError, KeyError):
             return None

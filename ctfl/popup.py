@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime as _dt, timezone as _tz
+from datetime import datetime as _dt
 
 from PyQt6.QtCore import QEvent, Qt, pyqtSignal
 from PyQt6.QtGui import QFont, QFontMetrics, QIcon
@@ -16,8 +16,8 @@ from PyQt6.QtWidgets import (
 )
 
 from .config import Config
-from .constants import DATE_FMT_DISPLAY, DATE_FMT_ISO, DATETIME_FMT_WEEKDAY, ICON_THEME_NAME, TIME_FMT_HM
-from .providers import RateLimitInfo, UsageData, format_cost, format_tokens
+from .constants import DATE_FMT_DISPLAY, DATE_FMT_ISO, ICON_THEME_NAME, TIME_FMT_HM
+from .providers import RateLimitInfo, UsageData, format_cost, format_reset, format_tokens
 
 _PROGRESS_BAR_STYLE = (
     "QProgressBar { background: #3a3a3a; border: none; border-radius: 5px; }"
@@ -192,7 +192,7 @@ class PopupWidget(QWidget):
         from .providers.prediction import predict_exhaustion
 
         for info in limits:
-            reset_text = _format_reset(info.resets_at)
+            reset_text = format_reset(info.resets_at)
             text = info.name
             if reset_text:
                 text += f"<br><span style='color: gray;'>{reset_text}</span>"
@@ -413,31 +413,6 @@ def _clear_layout(layout) -> None:
             item.widget().deleteLater()
         elif item.layout():
             _clear_layout(item.layout())
-
-
-def _format_reset(resets_at: str | None) -> str:
-    if not resets_at:
-        return ""
-    try:
-        reset_time = _dt.fromisoformat(resets_at)
-        now = _dt.now(_tz.utc)
-        delta = reset_time - now
-        total_seconds = int(delta.total_seconds())
-        if total_seconds <= 0:
-            return "Resets soon"
-        if total_seconds < 60:
-            return "Resets in <1 min"
-        if total_seconds < 3600:
-            return f"Resets in {total_seconds // 60} min"
-        hours = total_seconds // 3600
-        minutes = (total_seconds % 3600) // 60
-        if hours < 24:
-            return f"Resets in {hours} hr {minutes} min"
-        # More than a day: show weekday and time
-        local_time = reset_time.astimezone()
-        return f"Resets {local_time.strftime(DATETIME_FMT_WEEKDAY)}"
-    except (ValueError, TypeError):
-        return ""
 
 
 def _short_model(model: str) -> str:

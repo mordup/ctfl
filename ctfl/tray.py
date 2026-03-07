@@ -162,7 +162,6 @@ class TrayIcon(QSystemTrayIcon):
 
         menu.addSeparator()
 
-        from . import __version__
         version_action = QAction(f"CTFL - v{__version__}", menu)
         version_action.triggered.connect(self._show_about)
         menu.addAction(version_action)

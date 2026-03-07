@@ -352,7 +352,7 @@ class TrayIcon(QSystemTrayIcon):
         else:
             self.showMessage(
                 APP_DISPLAY_NAME,
-                f"v{version} is available — visit the release page to download",
+                f"v{version} is available — click 'Update to v{version}' in the menu to download",
                 QSystemTrayIcon.MessageIcon.Information,
                 5000,
             )
@@ -373,6 +373,11 @@ class TrayIcon(QSystemTrayIcon):
             self._update_action.setText("Check for Updates")
             self._update_action.setEnabled(True)
 
+    def _open_release_page(self, url: str) -> None:
+        from PyQt6.QtCore import QUrl
+        from PyQt6.QtGui import QDesktopServices
+        QDesktopServices.openUrl(QUrl(url))
+
     def _show_update_dialog(self, release: dict) -> None:
         from .updater import can_auto_update, detect_install_method, InstallMethod
         from PyQt6.QtWidgets import QMessageBox
@@ -380,31 +385,34 @@ class TrayIcon(QSystemTrayIcon):
         version = release["version"]
         method = detect_install_method()
 
+        dlg = QMessageBox()
+        dlg.setWindowTitle(f"Update to v{version}")
+        dlg.setIcon(QMessageBox.Icon.Information)
+
         if can_auto_update():
             method_name = "pip" if method == InstallMethod.PIP else "AppImage"
-            reply = QMessageBox.question(
-                None,
-                f"Update to v{version}",
+            dlg.setText(
                 f"CTFL v{version} is available (you have v{__version__}).\n\n"
-                f"Install method: {method_name}\n"
-                f"Update and restart now?",
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                f"Install method: {method_name}"
             )
-            if reply == QMessageBox.StandardButton.Yes:
+            update_btn = dlg.addButton("Update Now", QMessageBox.ButtonRole.AcceptRole)
+            download_btn = dlg.addButton("Download", QMessageBox.ButtonRole.ActionRole)
+            dlg.addButton(QMessageBox.StandardButton.Cancel)
+            dlg.exec()
+            if dlg.clickedButton() == update_btn:
                 self._apply_update(release)
+            elif dlg.clickedButton() == download_btn:
+                self._open_release_page(release["url"])
         else:
-            from PyQt6.QtGui import QDesktopServices
-            from PyQt6.QtCore import QUrl
-            reply = QMessageBox.information(
-                None,
-                f"Update to v{version}",
+            dlg.setText(
                 f"CTFL v{version} is available (you have v{__version__}).\n\n"
-                f"Auto-update is not available for system package installs.\n"
-                f"Open the release page to download?",
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                f"Auto-update is not available for system package installs."
             )
-            if reply == QMessageBox.StandardButton.Yes:
-                QDesktopServices.openUrl(QUrl(release["url"]))
+            download_btn = dlg.addButton("Download", QMessageBox.ButtonRole.AcceptRole)
+            dlg.addButton(QMessageBox.StandardButton.Cancel)
+            dlg.exec()
+            if dlg.clickedButton() == download_btn:
+                self._open_release_page(release["url"])
 
     def _apply_update(self, release: dict) -> None:
         from PyQt6.QtWidgets import QMessageBox

@@ -142,9 +142,14 @@ class SettingsDialog(QDialog):
 
         # System
         system_group = QGroupBox("System")
-        system_layout = QVBoxLayout(system_group)
+        system_layout = QFormLayout(system_group)
         self._autostart_check = QCheckBox("Start on login")
-        system_layout.addWidget(self._autostart_check)
+        system_layout.addRow(self._autostart_check)
+        self._update_check_spin = QSpinBox()
+        self._update_check_spin.setRange(0, 168)
+        self._update_check_spin.setSuffix(" hr")
+        self._update_check_spin.setSpecialValueText("Disabled")
+        system_layout.addRow("Check for updates:", self._update_check_spin)
         right.addWidget(system_group)
 
         right.addStretch()
@@ -202,6 +207,7 @@ class SettingsDialog(QDialog):
         self._rate_limit_spin.setValue(self._config.rate_limit_threshold)
         self._rate_limit_spin.setEnabled(self._config.rate_limit_warning)
         self._autostart_check.setChecked(self._autostart.is_enabled())
+        self._update_check_spin.setValue(self._config.update_check_interval)
 
         # Trigger initial state
         self._on_source_changed(self._source_buttons.checkedId(), True)
@@ -254,6 +260,9 @@ class SettingsDialog(QDialog):
         except Exception as e:
             QMessageBox.warning(self, "Error", str(e))
             return
+
+        # Update check interval
+        self._config.update_check_interval = self._update_check_spin.value()
 
         # Autostart
         try:

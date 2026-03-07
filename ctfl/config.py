@@ -115,3 +115,12 @@ class Config:
     @estimate_costs.setter
     def estimate_costs(self, v: bool) -> None:
         self._s.setValue("estimate_costs", v)
+
+    @property
+    def update_check_interval(self) -> int:
+        """Hours between automatic update checks. 0 = disabled."""
+        return self._get("update_check_interval", 24, int)
+
+    @update_check_interval.setter
+    def update_check_interval(self, v: int) -> None:
+        self._s.setValue("update_check_interval", v)

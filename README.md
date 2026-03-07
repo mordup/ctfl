@@ -42,6 +42,12 @@
 
 Download a package from the [Releases](https://github.com/mordup/ctfl/releases/latest) page, or see the [installation guide](https://ctfl.md-labs.dev/installation/) for all options.
 
+## Dependencies
+
+- Python >= 3.11
+- PyQt6
+- keyring (for secure API key storage)
+
 ## Contributing
 
 Found a bug or have an idea? [Open an issue](https://github.com/mordup/ctfl/issues).

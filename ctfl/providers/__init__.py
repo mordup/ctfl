@@ -42,6 +42,7 @@ class DailyUsage:
     cache_read_tokens: int = 0
     cache_creation_tokens: int = 0
     cost_usd: float | None = None
+    breakdown_available: bool = True
 
     @property
     def total_tokens(self) -> int:

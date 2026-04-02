@@ -272,15 +272,16 @@ class TrayIcon(QSystemTrayIcon):
             for info in data.limits:
                 pred = predict_exhaustion(info, info.window_key)
                 if pred:
-                    # Use prediction as the effective reset time
-                    time_part = pred.removeprefix("~")
+                    time_part = pred
+                    time_label = ""
                 else:
                     reset = format_reset(info.resets_at)
                     # "Resets in 3h50m" -> "3h50m", "Resets soon" -> "soon"
                     time_part = reset.removeprefix("Resets in ").removeprefix("Resets ")
+                    time_label = "resets: "
                 line = f"{info.name}: {info.utilization:.0f}%"
                 if time_part:
-                    line += f" | resets: {time_part}"
+                    line += f" | {time_label}{time_part}"
                 lines.append(line)
 
         if sync_text and not sync_used:
@@ -500,8 +501,17 @@ class TrayIcon(QSystemTrayIcon):
             self._thread.terminate()
             self._thread.wait(2000)
 
+    def _cleanup_update_thread(self) -> None:
+        if self._update_thread is None or not self._update_thread.isRunning():
+            return
+        self._update_thread.quit()
+        if not self._update_thread.wait(5000):
+            self._update_thread.terminate()
+            self._update_thread.wait(2000)
+
     def _restart(self) -> None:
         self._cleanup_thread()
+        self._cleanup_update_thread()
         from PyQt6.QtCore import QProcess
         from PyQt6.QtWidgets import QApplication
         QProcess.startDetached(sys.executable, ["-m", APP_NAME])
@@ -509,5 +519,6 @@ class TrayIcon(QSystemTrayIcon):
 
     def _quit(self) -> None:
         self._cleanup_thread()
+        self._cleanup_update_thread()
         from PyQt6.QtWidgets import QApplication
         QApplication.quit()

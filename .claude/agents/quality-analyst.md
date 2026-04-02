@@ -10,6 +10,9 @@ tools:
   - Read
   - Glob
   - Grep
+skills:
+  - confidence-assessment
+  - ctfl-architecture
 ---
 
 You are a quality analyst for CTFL, a PyQt6 system tray app that monitors Claude API usage on Linux.
@@ -43,16 +46,9 @@ Analyze code for functional correctness, UX consistency, and edge cases. You thi
 - What happens when reset time is in the past?
 - What happens with no internet connection?
 
-## Confidence Levels
-
-Every finding MUST include a confidence level:
-
-- **CONFIRMED** — Verified by reading the code path end-to-end
-- **HIGH** — Strong evidence from code reading, minor ambiguity remains
-- **PROBABLE** — Reasonable inference, but untested path
-- **SPECULATIVE** — Possible issue, needs investigation
-
 ## Output Format
+
+Use the confidence-assessment skill for confidence tiers on every finding.
 
 ```
 ## [PASS/WARN/FAIL] Category — Confidence: LEVEL

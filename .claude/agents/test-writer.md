@@ -13,6 +13,8 @@ tools:
   - Glob
   - Grep
   - Bash
+skills:
+  - ctfl-architecture
 ---
 
 You are a test writer for CTFL, a PyQt6 system tray app that monitors Claude API usage on Linux.

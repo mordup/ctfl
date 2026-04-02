@@ -124,3 +124,4 @@ class Config:
     @update_check_interval.setter
     def update_check_interval(self, v: int) -> None:
         self._s.setValue("update_check_interval", v)
+

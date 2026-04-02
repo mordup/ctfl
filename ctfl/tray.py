@@ -243,7 +243,7 @@ class TrayIcon(QSystemTrayIcon):
         lines = [header]
 
         # Second line: today + sync time
-        sync_time = f"Synced {datetime.now().strftime(TIME_FMT_HM)}" \
+        sync_time = f"synced {datetime.now().strftime(TIME_FMT_HM)}" \
             if self._config.tooltip_sync else None
         today_line = self._tooltip_today_line(data, format_tokens, format_cost) \
             if self._config.tooltip_today else None
@@ -253,7 +253,7 @@ class TrayIcon(QSystemTrayIcon):
         elif today_line:
             lines.append(today_line)
         elif sync_time:
-            lines.append(sync_time)
+            lines.append(sync_time.capitalize())
 
         # Limits
         if self._config.tooltip_limits and data.limits:

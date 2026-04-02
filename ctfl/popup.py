@@ -194,22 +194,20 @@ class PopupWidget(QWidget):
         for info in session_limits:
             pred = predict_exhaustion(info, info.window_key)
 
-            # Header: "Session" on left, prediction + reset on right
+            # Header: "Session · prediction" on left, reset on right
             reset_text = format_reset(info.resets_at)
-            right_parts = []
-            if pred:
-                right_parts.append(pred)
-            if reset_text:
-                right_parts.append(reset_text)
 
             header_row = QHBoxLayout()
-            header_label = QLabel(f"<b>{info.name}</b>")
+            left_text = f"<b>{info.name}</b>"
+            if pred:
+                left_text += f" · {pred}"
+            header_label = QLabel(left_text)
             header_row.addWidget(header_label)
             header_row.addStretch()
-            if right_parts:
-                right_label = QLabel(" · ".join(right_parts))
-                right_label.setStyleSheet("color: gray;")
-                header_row.addWidget(right_label)
+            if reset_text:
+                reset_label = QLabel(reset_text)
+                reset_label.setStyleSheet("color: gray;")
+                header_row.addWidget(reset_label)
             self._limits_layout.addLayout(header_row)
 
             # Bar only, no separate prediction line

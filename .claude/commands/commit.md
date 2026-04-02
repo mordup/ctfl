@@ -13,7 +13,19 @@ If either check required code changes, include those changes in the commit.
 - Run `git status` and `git diff` to review all changes (staged + unstaged)
 - Run `git log --oneline -5` to see recent commit style
 
-## 3. Stage and commit
+## 3. Split into logical commits
+
+Review all changes and group them into logical units. Each commit should be one coherent change — don't mix unrelated work into a single commit.
+
+Examples of good splits:
+- Feature code + its tests = one commit
+- Refactor A and unrelated refactor B = two commits
+- Bug fix + config change that enables it = one commit
+- 3 independent bug fixes = three commits
+
+If all changes are part of the same logical unit, a single commit is fine.
+
+## 4. Stage and commit (repeat per logical commit)
 
 - Stage relevant files by name (never `git add -A` or `git add .`)
 - Do NOT stage files that contain secrets (.env, credentials, tokens)
@@ -24,7 +36,7 @@ If either check required code changes, include those changes in the commit.
   - **No Co-Authored-By lines** — never add them
 - Use a HEREDOC for the commit message
 
-## 4. Verify
+## 5. Verify
 
-- Run `git status` after commit to confirm success
+- Run `git status` after all commits to confirm clean state
 - Report what was committed

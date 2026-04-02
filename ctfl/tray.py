@@ -253,7 +253,7 @@ class TrayIcon(QSystemTrayIcon):
         elif today_line:
             lines.append(today_line)
         elif sync_time:
-            lines[0] += f" — {sync_time}"
+            lines.append(sync_time)
 
         # Limits
         if self._config.tooltip_limits and data.limits:

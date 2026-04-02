@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from . import RateLimitInfo
 
@@ -27,7 +27,7 @@ def predict_exhaustion(info: RateLimitInfo, window_key: str) -> str | None:
 
     try:
         reset_time = datetime.fromisoformat(info.resets_at)
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         hours_until_reset = (reset_time - now).total_seconds() / 3600
     except (ValueError, TypeError):
         return None
@@ -56,5 +56,5 @@ def predict_exhaustion(info: RateLimitInfo, window_key: str) -> str | None:
     hours = total_min // 60
     minutes = total_min % 60
     if hours > 0:
-        return f"~{hours}h {minutes:02d}m left"
+        return f"~{hours}h{minutes:02d}m left"
     return f"~{minutes}m left"

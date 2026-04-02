@@ -249,28 +249,43 @@ class TrayIcon(QSystemTrayIcon):
                 if today_data.cost_usd is not None:
                     today_line += f" · {format_cost(today_data.cost_usd)}"
 
+        sync_text = f"Last sync: {datetime.now().strftime(TIME_FMT_HM)}" \
+            if self._config.tooltip_sync else None
+        sync_used = False
+
         if plan and today_line:
             lines.append(f"{plan} — {today_line}")
+        elif plan and not today_line and sync_text:
+            lines.append(f"{plan} — {sync_text}")
+            sync_used = True
         elif plan:
             lines.append(plan)
         elif today_line:
             lines.append(today_line)
+        elif sync_text:
+            lines.append(sync_text)
+            sync_used = True
 
         if self._config.tooltip_limits and data.limits:
             from .providers.prediction import predict_exhaustion
             lines.append("")
             for info in data.limits:
-                reset = format_reset(info.resets_at)
-                reset_part = f" ({reset.lower()})" if reset else ""
-                line = f"{info.name}: {info.utilization:.0f}%{reset_part}"
                 pred = predict_exhaustion(info, info.window_key)
                 if pred:
-                    line += f" — {pred}"
+                    # Use prediction as the effective reset time
+                    time_part = pred.removeprefix("~")
+                else:
+                    reset = format_reset(info.resets_at)
+                    # "Resets in 3h50m" -> "3h50m", "Resets soon" -> "soon"
+                    time_part = reset.removeprefix("Resets in ").removeprefix("Resets ")
+                line = f"{info.name}: {info.utilization:.0f}%"
+                if time_part:
+                    line += f" | resets: {time_part}"
                 lines.append(line)
 
-        if self._config.tooltip_sync:
+        if sync_text and not sync_used:
             lines.append("")
-            lines.append(f"Last sync: {datetime.now().strftime(TIME_FMT_HM)}")
+            lines.append(sync_text)
 
         self.setToolTip("\n".join(lines))
 
@@ -379,8 +394,9 @@ class TrayIcon(QSystemTrayIcon):
         QDesktopServices.openUrl(QUrl(url))
 
     def _show_update_dialog(self, release: dict) -> None:
-        from .updater import can_auto_update, detect_install_method, InstallMethod
         from PyQt6.QtWidgets import QMessageBox
+
+        from .updater import InstallMethod, can_auto_update, detect_install_method
 
         version = release["version"]
         method = detect_install_method()
@@ -415,7 +431,6 @@ class TrayIcon(QSystemTrayIcon):
                 self._open_release_page(release["url"])
 
     def _apply_update(self, release: dict) -> None:
-        from PyQt6.QtWidgets import QMessageBox
 
         self._update_action.setText("Updating...")
         self._update_action.setEnabled(False)

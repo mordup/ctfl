@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
-from urllib.request import Request, urlopen
-from urllib.error import URLError, HTTPError
 import json
+from datetime import UTC, datetime, timedelta
+from urllib.error import HTTPError, URLError
+from urllib.request import Request, urlopen
 
-from . import DailyUsage, ModelTokens, UsageData
 from ..constants import DATE_FMT_ISO
+from . import DailyUsage, ModelTokens, UsageData
 
 BASE_URL = "https://api.anthropic.com/v1/organizations"
 
@@ -35,8 +35,8 @@ class ApiProvider:
             return UsageData(error=f"API: {e}")
 
     def _fetch(self, api_key: str, days: int) -> UsageData:
-        end = datetime.now(timezone.utc).strftime(DATE_FMT_ISO)
-        start = (datetime.now(timezone.utc) - timedelta(days=days)).strftime(DATE_FMT_ISO)
+        end = datetime.now(UTC).strftime(DATE_FMT_ISO)
+        start = (datetime.now(UTC) - timedelta(days=days)).strftime(DATE_FMT_ISO)
 
         headers = {
             "x-api-key": api_key,

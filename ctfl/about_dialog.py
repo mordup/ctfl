@@ -5,7 +5,7 @@ from PyQt6.QtGui import QIcon
 from PyQt6.QtWidgets import QDialog, QDialogButtonBox, QLabel, QVBoxLayout
 
 from . import __changelog__, __version__
-from .constants import APP_DISPLAY_NAME, APP_NAME, ICON_THEME_NAME
+from .constants import APP_DISPLAY_NAME, ICON_THEME_NAME
 
 
 class AboutDialog(QDialog):

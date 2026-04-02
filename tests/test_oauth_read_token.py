@@ -1,6 +1,6 @@
 import json
 
-from ctfl.providers.oauth import OAuthUsageProvider, CREDENTIALS_FILE
+from ctfl.providers.oauth import OAuthUsageProvider
 
 
 def test_read_oauth_token_valid(tmp_path, monkeypatch):

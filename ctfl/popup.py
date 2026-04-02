@@ -400,7 +400,7 @@ def _format_breakdown(
     """Return structured breakdown items for non-zero token categories."""
     values = [input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens]
     items = []
-    for (symbol, label, color), value in zip(_BREAKDOWN_CATEGORIES, values):
+    for (symbol, label, color), value in zip(_BREAKDOWN_CATEGORIES, values, strict=True):
         if value:
             items.append((symbol, format_tokens(value), label, color))
     return items or None

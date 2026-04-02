@@ -498,10 +498,14 @@ class TrayIcon(QSystemTrayIcon):
         AboutDialog(self.contextMenu()).exec()
 
     def _show_settings(self) -> None:
+        was_popup_visible = self._popup.isVisible()
         self._popup.hide()
         dlg = SettingsDialog(self._config, self._credentials, self._autostart)
         dlg.settings_changed.connect(self._on_settings_changed)
         dlg.exec()
+        if was_popup_visible:
+            self._popup.show()
+            self._popup.activateWindow()
 
     def _on_settings_changed(self) -> None:
         self._start_timer()

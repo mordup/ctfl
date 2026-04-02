@@ -187,39 +187,100 @@ class PopupWidget(QWidget):
 
         from .providers.prediction import predict_exhaustion
 
-        for info in limits:
-            reset_text = format_reset(info.resets_at)
-            text = info.name
-            if reset_text:
-                text += f"<br><span style='color: gray;'>{reset_text}</span>"
-            name_label = QLabel(text)
-            self._limits_layout.addWidget(name_label)
+        # Separate session from weekly limits
+        session_limits = [i for i in limits if i.window_key == "five_hour"]
+        weekly_limits = [i for i in limits if i.window_key != "five_hour"]
 
-            bar_row = QHBoxLayout()
-            bar_row.setSpacing(8)
-            bar = QProgressBar()
-            bar.setRange(0, 100)
-            bar.setValue(int(info.utilization))
-            bar.setTextVisible(False)
-            bar.setFixedHeight(10)
-            bar.setStyleSheet(_PROGRESS_BAR_STYLE)
-            pct_label = QLabel(f"{info.utilization:.0f}% used")
-
-            bar_row.addWidget(bar, 1)
-            bar_row.addWidget(pct_label)
-            self._limits_layout.addLayout(bar_row)
-
+        for info in session_limits:
             pred = predict_exhaustion(info, info.window_key)
+
+            # Header: "Session" on left, prediction + reset on right
+            reset_text = format_reset(info.resets_at)
+            right_parts = []
             if pred:
-                pred_label = QLabel(pred)
-                pred_label.setStyleSheet("color: gray; font-size: 11px;")
-                self._limits_layout.addWidget(pred_label)
+                right_parts.append(pred)
+            if reset_text:
+                right_parts.append(reset_text)
+
+            header_row = QHBoxLayout()
+            header_label = QLabel(f"<b>{info.name}</b>")
+            header_row.addWidget(header_label)
+            header_row.addStretch()
+            if right_parts:
+                right_label = QLabel(" · ".join(right_parts))
+                right_label.setStyleSheet("color: gray;")
+                header_row.addWidget(right_label)
+            self._limits_layout.addLayout(header_row)
+
+            # Bar only, no separate prediction line
+            self._add_limit_bar(info, None, None)
+
+        if weekly_limits and session_limits:
+            # Add spacing between session and weekly sections
+            from PyQt6.QtWidgets import QSizePolicy, QSpacerItem
+            self._limits_layout.addItem(
+                QSpacerItem(0, 6, QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed)
+            )
+
+        if weekly_limits:
+            # Shared reset time for all weekly limits
+            weekly_reset = ""
+            for info in weekly_limits:
+                if info.resets_at:
+                    weekly_reset = format_reset(info.resets_at)
+                    break
+
+            # Group header: "Weekly" on left, reset on right
+            header_row = QHBoxLayout()
+            header_label = QLabel("<b>Weekly</b>")
+            header_row.addWidget(header_label)
+            header_row.addStretch()
+            if weekly_reset:
+                reset_label = QLabel(weekly_reset)
+                reset_label.setStyleSheet("color: gray;")
+                header_row.addWidget(reset_label)
+            self._limits_layout.addLayout(header_row)
+
+            # Label each bar when there are multiple weekly limits
+            for info in weekly_limits:
+                if info.name.startswith("Weekly (") and info.name.endswith(")"):
+                    label = info.name[8:-1]  # "Weekly (Sonnet)" -> "Sonnet"
+                else:
+                    label = "Global" if len(weekly_limits) > 1 else None
+                self._add_limit_bar(info, label, predict_exhaustion)
 
         # Separator line
         sep = QFrame()
         sep.setFrameShape(QFrame.Shape.HLine)
         sep.setFrameShadow(QFrame.Shadow.Sunken)
         self._limits_layout.addWidget(sep)
+
+    def _add_limit_bar(self, info, label, predict_exhaustion) -> None:
+        """Add a progress bar row with optional left label and prediction."""
+        bar_row = QHBoxLayout()
+        bar_row.setSpacing(8)
+        if label:
+            lbl = QLabel(label)
+            lbl.setFixedWidth(55)
+            lbl.setStyleSheet("font-size: 11px;")
+            bar_row.addWidget(lbl)
+        bar = QProgressBar()
+        bar.setRange(0, 100)
+        bar.setValue(int(info.utilization))
+        bar.setTextVisible(False)
+        bar.setFixedHeight(10)
+        bar.setStyleSheet(_PROGRESS_BAR_STYLE)
+        pct_label = QLabel(f"{info.utilization:.0f}% used")
+        bar_row.addWidget(bar, 1)
+        bar_row.addWidget(pct_label)
+        self._limits_layout.addLayout(bar_row)
+
+        if predict_exhaustion is not None:
+            pred = predict_exhaustion(info, info.window_key)
+            if pred:
+                pred_label = QLabel(pred)
+                pred_label.setStyleSheet("color: gray; font-size: 11px;")
+                self._limits_layout.addWidget(pred_label)
 
     def _update_status(self) -> None:
         self._status_label.setText(

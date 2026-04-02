@@ -237,58 +237,86 @@ class TrayIcon(QSystemTrayIcon):
         from .providers import format_cost, format_reset, format_tokens
         from .providers.oauth import read_plan_name
 
-        lines = [APP_DISPLAY_NAME]
-
+        # Header: app name + plan
         plan = read_plan_name()
-        today_line = None
-        if self._config.tooltip_today:
-            today = datetime.now().strftime(DATE_FMT_ISO)
-            today_data = next((d for d in data.daily if d.date == today), None)
-            if today_data:
-                today_line = f"Today: {format_tokens(today_data.total_tokens)} tokens"
-                if today_data.cost_usd is not None:
-                    today_line += f" · {format_cost(today_data.cost_usd)}"
+        header = f"{APP_DISPLAY_NAME} — {plan}" if plan else APP_DISPLAY_NAME
+        lines = [header]
 
-        sync_text = f"Last sync: {datetime.now().strftime(TIME_FMT_HM)}" \
+        # Second line: today + sync time
+        sync_time = f"Synced {datetime.now().strftime(TIME_FMT_HM)}" \
             if self._config.tooltip_sync else None
-        sync_used = False
+        today_line = self._tooltip_today_line(data, format_tokens, format_cost) \
+            if self._config.tooltip_today else None
 
-        if plan and today_line:
-            lines.append(f"{plan} — {today_line}")
-        elif plan and not today_line and sync_text:
-            lines.append(f"{plan} — {sync_text}")
-            sync_used = True
-        elif plan:
-            lines.append(plan)
+        if today_line and sync_time:
+            lines.append(f"{today_line} — {sync_time}")
         elif today_line:
             lines.append(today_line)
-        elif sync_text:
-            lines.append(sync_text)
-            sync_used = True
+        elif sync_time:
+            lines[0] += f" — {sync_time}"
 
+        # Limits
         if self._config.tooltip_limits and data.limits:
-            from .providers.prediction import predict_exhaustion
-            lines.append("")
-            for info in data.limits:
-                pred = predict_exhaustion(info, info.window_key)
-                if pred:
-                    time_part = pred
-                    time_label = ""
-                else:
-                    reset = format_reset(info.resets_at)
-                    # "Resets in 3h50m" -> "3h50m", "Resets soon" -> "soon"
-                    time_part = reset.removeprefix("Resets in ").removeprefix("Resets ")
-                    time_label = "resets: "
-                line = f"{info.name}: {info.utilization:.0f}%"
-                if time_part:
-                    line += f" | {time_label}{time_part}"
-                lines.append(line)
-
-        if sync_text and not sync_used:
-            lines.append("")
-            lines.append(sync_text)
+            limit_lines = self._tooltip_limits_lines(data, format_reset)
+            if limit_lines:
+                lines.append("")
+                lines.extend(limit_lines)
 
         self.setToolTip("\n".join(lines))
+
+    def _tooltip_today_line(self, data, format_tokens, format_cost):
+        today = datetime.now().strftime(DATE_FMT_ISO)
+        today_data = next((d for d in data.daily if d.date == today), None)
+        if not today_data:
+            return None
+        line = f"Today: {format_tokens(today_data.total_tokens)} tokens"
+        if today_data.cost_usd is not None:
+            line += f" · {format_cost(today_data.cost_usd)}"
+        return line
+
+    def _tooltip_limits_lines(self, data, format_reset):
+        from .providers.prediction import predict_exhaustion
+
+        # Separate session (five_hour) from weekly (seven_day*) limits
+        session_lines = []
+        weekly_parts = []
+        weekly_reset = ""
+        weekly_pred = None
+
+        for info in data.limits:
+            pred = predict_exhaustion(info, info.window_key)
+            if info.window_key == "five_hour":
+                parts = [f"{info.name}: {info.utilization:.0f}%"]
+                if pred:
+                    parts.append(pred)
+                reset = format_reset(info.resets_at)
+                short = reset.removeprefix("Resets in ").removeprefix("Resets ")
+                if short:
+                    parts.append(f"resets {short}")
+                session_lines.append(" | ".join(parts))
+            else:
+                # Weekly limits — collect for grouping
+                label = info.name
+                if label.startswith("Weekly (") and label.endswith(")"):
+                    label = label[8:-1]  # "Sonnet", "Opus"
+                weekly_parts.append(f"{label}: {info.utilization:.0f}%")
+                if pred and weekly_pred is None:
+                    weekly_pred = pred
+                if not weekly_reset and info.resets_at:
+                    reset = format_reset(info.resets_at)
+                    weekly_reset = reset.removeprefix("Resets in ").removeprefix("Resets ")
+
+        result = session_lines[:]
+
+        if weekly_parts:
+            line = " · ".join(weekly_parts)
+            if weekly_pred:
+                line += f" | {weekly_pred}"
+            elif weekly_reset:
+                line += f" | resets {weekly_reset}"
+            result.append(line)
+
+        return result
 
     def _check_rate_limits(self, data: UsageData) -> None:
         if not self._config.rate_limit_warning or not data.limits:

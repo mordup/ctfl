@@ -2,12 +2,12 @@ from __future__ import annotations
 
 import json
 from collections import defaultdict
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from . import DailyUsage, ModelTokens, ProjectUsage, UsageData
 from ..constants import DATE_FMT_ISO
+from . import DailyUsage, ModelTokens, ProjectUsage, UsageData
 
 if TYPE_CHECKING:
     from ..config import Config
@@ -73,7 +73,7 @@ class LocalProvider:
             return UsageData(error=f"Local: {e}")
 
     def _fetch(self, days: int) -> UsageData:
-        cutoff_date = (datetime.now(timezone.utc) - timedelta(days=days)).strftime(DATE_FMT_ISO)
+        cutoff_date = (datetime.now(UTC) - timedelta(days=days)).strftime(DATE_FMT_ISO)
         cache_data = self._read_stats_cache()
         cache_cutoff = cache_data.get("lastComputedDate", "")
 
@@ -189,7 +189,7 @@ class LocalProvider:
         if cache_cutoff:
             try:
                 cutoff_ts = datetime.strptime(cache_cutoff, DATE_FMT_ISO).replace(
-                    tzinfo=timezone.utc
+                    tzinfo=UTC
                 ).timestamp()
             except ValueError:
                 cutoff_ts = 0

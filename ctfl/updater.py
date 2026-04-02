@@ -86,8 +86,8 @@ def check_for_update() -> dict | None:
 def _is_newer(remote: str, local: str) -> bool:
     try:
         r = tuple(int(x) for x in remote.split("."))
-        l = tuple(int(x) for x in local.split("."))
-        return r > l
+        loc = tuple(int(x) for x in local.split("."))
+        return r > loc
     except (ValueError, TypeError):
         return False
 

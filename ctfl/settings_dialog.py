@@ -124,8 +124,8 @@ class SettingsDialog(QDialog):
         self._tooltip_limits = QCheckBox("Rate limits")
         self._tooltip_sync = QCheckBox("Last sync time")
         tooltip_layout.addWidget(self._tooltip_today)
-        tooltip_layout.addWidget(self._tooltip_limits)
         tooltip_layout.addWidget(self._tooltip_sync)
+        tooltip_layout.addWidget(self._tooltip_limits)
         right.addWidget(tooltip_group)
 
         # Notifications

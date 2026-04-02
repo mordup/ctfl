@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import fcntl
 import json
 import os
 import time
@@ -64,7 +65,11 @@ def _save_limits_cache(limits: list[RateLimitInfo]) -> None:
         data = [{"name": li.name, "utilization": li.utilization,
                  "resets_at": li.resets_at, "window_key": li.window_key}
                 for li in limits]
-        _CACHE_FILE.write_text(json.dumps(data))
+        fd = os.open(str(_CACHE_FILE), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        try:
+            os.write(fd, json.dumps(data).encode())
+        finally:
+            os.close(fd)
     except OSError:
         pass
 
@@ -86,6 +91,7 @@ def _parse_limits(data: dict) -> list[RateLimitInfo]:
         utilization = entry.get("utilization")
         if utilization is None:
             continue
+        utilization = max(0.0, min(100.0, float(utilization)))
         limits.append(RateLimitInfo(
             name=label,
             utilization=utilization,
@@ -98,7 +104,11 @@ def _parse_limits(data: dict) -> list[RateLimitInfo]:
 def _save_org_id(org_id: str) -> None:
     try:
         _CACHE_DIR.mkdir(parents=True, exist_ok=True)
-        _ORG_CACHE_FILE.write_text(org_id)
+        fd = os.open(str(_ORG_CACHE_FILE), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        try:
+            os.write(fd, org_id.encode())
+        finally:
+            os.close(fd)
     except OSError:
         pass
 
@@ -207,14 +217,23 @@ class OAuthUsageProvider:
             org_info = result.get("organization")
             if org_info and org_info.get("uuid"):
                 _save_org_id(org_info["uuid"])
-            creds_data["claudeAiOauth"] = oauth
-            tmp = CREDENTIALS_FILE.with_suffix(".tmp")
-            fd = os.open(str(tmp), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+            lock_fd = os.open(str(CREDENTIALS_FILE), os.O_RDONLY)
             try:
-                os.write(fd, json.dumps(creds_data, indent=2).encode())
+                fcntl.flock(lock_fd, fcntl.LOCK_EX)
+                # Re-read credentials under lock in case Claude CLI modified them
+                with open(CREDENTIALS_FILE) as f:
+                    creds_data = json.load(f)
+                creds_data["claudeAiOauth"] = oauth
+                tmp = CREDENTIALS_FILE.with_suffix(".tmp")
+                fd = os.open(str(tmp), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+                try:
+                    os.write(fd, json.dumps(creds_data, indent=2).encode())
+                finally:
+                    os.close(fd)
+                tmp.rename(CREDENTIALS_FILE)
             finally:
-                os.close(fd)
-            tmp.rename(CREDENTIALS_FILE)
+                fcntl.flock(lock_fd, fcntl.LOCK_UN)
+                os.close(lock_fd)
             return new_token
         except (HTTPError, URLError, OSError, json.JSONDecodeError, KeyError):
             return None

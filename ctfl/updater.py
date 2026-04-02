@@ -156,6 +156,7 @@ def _update_appimage(release: dict) -> str | None:
     fd = os.open(str(tmp), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o755)
     try:
         os.write(fd, new_data)
+        os.fsync(fd)
     finally:
         os.close(fd)
     tmp.rename(target)

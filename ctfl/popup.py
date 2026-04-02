@@ -132,7 +132,7 @@ class PopupWidget(QWidget):
             breakdown = _format_breakdown(
                 day.input_tokens, day.output_tokens,
                 day.cache_read_tokens, day.cache_creation_tokens,
-            ) if show_bd else None
+            ) if show_bd and day.breakdown_available else None
             daily_rows.append((label, day.total_tokens, max_day_tokens, detail, breakdown))
         self._daily_chart.set_rows(daily_rows)
 
@@ -173,11 +173,7 @@ class PopupWidget(QWidget):
                 _clear_layout(item.layout())
 
         if not limits:
-            self._limits_frame.setVisible(True)
-            hint = QLabel("Log in to claude.ai for rate limits")
-            hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            hint.setStyleSheet("color: gray;")
-            self._limits_layout.addWidget(hint)
+            self._limits_frame.setVisible(False)
             return
 
         self._limits_frame.setVisible(True)
@@ -338,7 +334,7 @@ class _BarChartWidget(QWidget):
             font = label.font()
             font.setFamily("monospace")
             label.setFont(font)
-            label.setMinimumWidth(70)
+            label.setMinimumWidth(100)
             top.addWidget(label)
             top.addStretch()
             detail = QLabel(detail_text)

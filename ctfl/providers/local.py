@@ -101,12 +101,12 @@ class LocalProvider:
                 session_count=activity.get("sessionCount", 0),
             )
             # stats-cache only stores combined totals per model per day
-            # (no input/output/cache breakdown), so we store the sum as
-            # input_tokens; the JSONL scan fills in real breakdowns for
-            # dates after the cache cutoff.
+            # (no input/output/cache breakdown). Store total in input_tokens
+            # so total_tokens property works, but mark breakdown as unavailable
+            # to avoid showing misleading per-category data.
             model_tokens = tokens_by_date.get(date_str, {})
-            total = sum(model_tokens.values())
-            day.input_tokens = total
+            day.input_tokens = sum(model_tokens.values())
+            day.breakdown_available = False
             daily_map[date_str] = day
 
         # Process cached model usage for overall totals

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import UTC
 from typing import Protocol
 
 
@@ -49,7 +50,7 @@ class DailyUsage:
 
 @dataclass
 class RateLimitInfo:
-    name: str            # "Current session", "Weekly — All models", etc.
+    name: str            # "Session", "Weekly", "Weekly (Sonnet)", etc.
     utilization: float   # 0-100 percentage
     resets_at: str | None  # ISO 8601 timestamp or None
     window_key: str = ""  # "five_hour", "seven_day", etc.
@@ -77,25 +78,25 @@ class UsageProvider(Protocol):
 
 
 def format_reset(resets_at: str | None) -> str:
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     if not resets_at:
         return ""
     try:
         reset_time = datetime.fromisoformat(resets_at)
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         delta = reset_time - now
         total_seconds = int(delta.total_seconds())
         if total_seconds <= 0:
             return "Resets soon"
         if total_seconds < 60:
-            return "Resets in <1 min"
+            return "Resets in <1m"
         if total_seconds < 3600:
-            return f"Resets in {total_seconds // 60} min"
+            return f"Resets in {total_seconds // 60}m"
         hours = total_seconds // 3600
         minutes = (total_seconds % 3600) // 60
         if hours < 24:
-            return f"Resets in {hours} hr {minutes} min"
+            return f"Resets in {hours}h{minutes:02d}m"
         from ..constants import DATETIME_FMT_WEEKDAY
         local_time = reset_time.astimezone()
         return f"Resets {local_time.strftime(DATETIME_FMT_WEEKDAY)}"

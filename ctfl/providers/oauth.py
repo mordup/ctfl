@@ -3,8 +3,8 @@ from __future__ import annotations
 import json
 import os
 import time
+from collections.abc import Callable
 from pathlib import Path
-from typing import Callable
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
@@ -22,10 +22,10 @@ _ORG_CACHE_FILE = _CACHE_DIR / "org_id.txt"
 _TOKEN_EXPIRY_BUFFER = 300  # refresh 5 min before expiry
 
 _KEY_LABELS = {
-    "five_hour": "Current session",
+    "five_hour": "Session",
     "seven_day": "Weekly",
-    "seven_day_opus": "Weekly — Opus",
-    "seven_day_sonnet": "Weekly — Sonnet",
+    "seven_day_opus": "Weekly (Opus)",
+    "seven_day_sonnet": "Weekly (Sonnet)",
 }
 
 

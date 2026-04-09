@@ -54,6 +54,7 @@ Don't scan method-by-method. Instead:
 - Are datetime operations timezone-aware consistently?
 - Are error handlers swallowing important exceptions?
 - Are cache files handled atomically (no partial reads/writes)?
+- Are values passed to Qt widgets within 32-bit signed int range (e.g. QProgressBar.setRange)?
 
 ### Dependencies
 - Are imports available on all target platforms (Linux only, Python 3.11+)?

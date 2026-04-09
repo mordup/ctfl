@@ -16,12 +16,20 @@ from PyQt6.QtWidgets import (
 )
 
 from .config import Config
-from .constants import DATE_FMT_DISPLAY, DATE_FMT_ISO, ICON_THEME_NAME, TIME_FMT_HM
+from .constants import (
+    COLOR_ACCENT,
+    COLOR_MUTED,
+    DATE_FMT_DISPLAY,
+    DATE_FMT_ISO,
+    FONT_SIZE_SMALL,
+    ICON_THEME_NAME,
+    TIME_FMT_HM,
+)
 from .providers import RateLimitInfo, UsageData, format_cost, format_reset, format_tokens
 
 _PROGRESS_BAR_STYLE = (
     "QProgressBar { background: #3a3a3a; border: none; border-radius: 3px; }"
-    "QProgressBar::chunk { background: #5B9BF6; border-radius: 3px; }"
+    f"QProgressBar::chunk {{ background: {COLOR_ACCENT}; border-radius: 3px; }}"
 )
 
 
@@ -72,7 +80,7 @@ class PopupWidget(QWidget):
         # Footer
         footer = QHBoxLayout()
         self._status_label = QLabel()
-        self._status_label.setStyleSheet("color: gray;")
+        self._status_label.setStyleSheet(f"color: {COLOR_MUTED};")
         footer.addWidget(self._status_label)
         footer.addStretch()
         self._refresh_btn = QPushButton("Refresh")
@@ -206,7 +214,7 @@ class PopupWidget(QWidget):
             header_row.addStretch()
             if reset_text:
                 reset_label = QLabel(reset_text)
-                reset_label.setStyleSheet("color: gray;")
+                reset_label.setStyleSheet(f"color: {COLOR_MUTED};")
                 header_row.addWidget(reset_label)
             self._limits_layout.addLayout(header_row)
 
@@ -235,7 +243,7 @@ class PopupWidget(QWidget):
             header_row.addStretch()
             if weekly_reset:
                 reset_label = QLabel(weekly_reset)
-                reset_label.setStyleSheet("color: gray;")
+                reset_label.setStyleSheet(f"color: {COLOR_MUTED};")
                 header_row.addWidget(reset_label)
             self._limits_layout.addLayout(header_row)
 
@@ -260,7 +268,7 @@ class PopupWidget(QWidget):
         if label:
             lbl = QLabel(label)
             lbl.setFixedWidth(55)
-            lbl.setStyleSheet("font-size: 11px;")
+            lbl.setStyleSheet(f"font-size: {FONT_SIZE_SMALL};")
             bar_row.addWidget(lbl)
         bar = QProgressBar()
         bar.setRange(0, 100)
@@ -277,7 +285,7 @@ class PopupWidget(QWidget):
             pred = predict_exhaustion(info, info.window_key)
             if pred:
                 pred_label = QLabel(pred)
-                pred_label.setStyleSheet("color: gray; font-size: 11px;")
+                pred_label.setStyleSheet(f"color: {COLOR_MUTED}; font-size: {FONT_SIZE_SMALL};")
                 self._limits_layout.addWidget(pred_label)
 
     def _update_status(self) -> None:
@@ -397,7 +405,7 @@ class _BarChartWidget(QWidget):
             top.addWidget(label)
             top.addStretch()
             detail = QLabel(detail_text)
-            detail.setStyleSheet("color: #aaa; font-size: 11px;")
+            detail.setStyleSheet(f"color: {COLOR_MUTED}; font-size: {FONT_SIZE_SMALL};")
             top.addWidget(detail)
             row_layout.addLayout(top)
 
@@ -436,7 +444,7 @@ class _BarChartWidget(QWidget):
 
 
 _BREAKDOWN_CATEGORIES = [
-    ("↓", "in", "#5B9BF6"),
+    ("↓", "in", COLOR_ACCENT),
     ("↑", "out", "#F59E0B"),
     ("⟳", "cache", "#9B8ECE"),
     ("✦", "new cache", "#6366F1"),

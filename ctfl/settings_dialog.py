@@ -20,7 +20,7 @@ from PyQt6.QtWidgets import (
 
 from .autostart import Autostart
 from .config import Config
-from .constants import ICON_THEME_NAME
+from .constants import COLOR_MUTED, FONT_SIZE_SMALL, ICON_THEME_NAME
 from .credentials import Credentials
 
 
@@ -113,7 +113,7 @@ class SettingsDialog(QDialog):
         self._cf_clearance_input.setPlaceholderText("cf_clearance value")
         session_layout.addRow("CF Clearance:", self._cf_clearance_input)
         hint = QLabel("From claude.ai → DevTools → Cookies")
-        hint.setStyleSheet("color: gray; font-size: 11px;")
+        hint.setStyleSheet(f"color: {COLOR_MUTED}; font-size: {FONT_SIZE_SMALL};")
         session_layout.addRow(hint)
         right.addWidget(session_group)
 

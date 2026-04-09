@@ -1,4 +1,4 @@
-# Maintainer: Morgan <morgan@example.com>
+# Maintainer: Morgan <morgan@mordup.com>
 pkgname=ctfl
 pkgver=2.4.2
 pkgrel=1
@@ -17,18 +17,16 @@ makedepends=(
     'python-wheel'
     'python-setuptools'
 )
-source=()
-sha256sums=()
-PKGDEST="${startdir}/dist"
+source=("$pkgname-$pkgver.tar.gz::https://github.com/mordup/ctfl/archive/refs/tags/v$pkgver.tar.gz")
+sha256sums=('8b1f40475d41eccbcb58e777158b7f3377dfa88c69f56c131e43bd2396f6540a')
 
 build() {
-    cd "$startdir"
-    rm -rf dist
+    cd "$pkgname-$pkgver"
     python -m build --wheel --no-isolation
 }
 
 package() {
-    cd "$startdir"
+    cd "$pkgname-$pkgver"
     python -m installer --destdir="$pkgdir" dist/*.whl
 
     install -Dm644 icons/ctfl.svg \

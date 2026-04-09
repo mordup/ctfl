@@ -49,10 +49,11 @@ Update the version string in ALL of these files (they must match):
 - `ctfl/__init__.py` — update `__version__` and `__changelog__`
 - `PKGBUILD` — update `pkgver`
 - `appimage/requirements.txt` — update the version in the ctfl requirement line
+- `aur/PKGBUILD` — update `pkgver` (sha256sums updated later in step 10)
 
 ## 5. Commit the version bump
 
-Stage the three version files and commit: `release: X.Y.Z`
+Stage the four version files and commit: `release: X.Y.Z`
 
 ## 6. Tag
 
@@ -92,7 +93,35 @@ gh release create vX.Y.Z \
   dist/CTFL-x86_64.AppImage
 ```
 
-## 10. Verify and remind
+## 10. Update AUR package
+
+Now that the tag is on GitHub, update the AUR package:
+
+1. Download the source tarball and compute the sha256sum:
+   ```bash
+   curl -sL https://github.com/mordup/ctfl/archive/refs/tags/vX.Y.Z.tar.gz | sha256sum
+   ```
+2. Update `sha256sums` in `aur/PKGBUILD` with the new hash
+3. Regenerate `.SRCINFO`:
+   ```bash
+   cd aur && makepkg --printsrcinfo > .SRCINFO && cd ..
+   ```
+4. Commit: `chore: update AUR package to X.Y.Z`
+5. Push the commit: `git push`
+6. Push to AUR — clone the AUR repo into a temp dir, copy files, and push:
+   ```bash
+   tmp=$(mktemp -d)
+   git clone ssh://aur@aur.archlinux.org/ctfl.git "$tmp/ctfl-aur"
+   cp aur/PKGBUILD aur/.SRCINFO "$tmp/ctfl-aur/"
+   cd "$tmp/ctfl-aur"
+   git add PKGBUILD .SRCINFO
+   git commit -m "Update to X.Y.Z"
+   git push
+   cd -
+   rm -rf "$tmp"
+   ```
+
+## 11. Verify and remind
 
 - Run `gh release view vX.Y.Z` to confirm all assets are uploaded
 - Report the release URL to the user

@@ -61,15 +61,17 @@ def _is_expired(expires_at_ms: int) -> bool:
 
 def _save_limits_cache(limits: list[RateLimitInfo]) -> None:
     try:
-        _CACHE_DIR.mkdir(parents=True, exist_ok=True)
+        _CACHE_DIR.mkdir(parents=True, exist_ok=True, mode=0o700)
         data = [{"name": li.name, "utilization": li.utilization,
                  "resets_at": li.resets_at, "window_key": li.window_key}
                 for li in limits]
-        fd = os.open(str(_CACHE_FILE), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        tmp = _CACHE_FILE.with_suffix(".tmp")
+        fd = os.open(str(tmp), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
         try:
             os.write(fd, json.dumps(data).encode())
         finally:
             os.close(fd)
+        tmp.rename(_CACHE_FILE)
     except OSError:
         pass
 
@@ -103,7 +105,7 @@ def _parse_limits(data: dict) -> list[RateLimitInfo]:
 
 def _save_org_id(org_id: str) -> None:
     try:
-        _CACHE_DIR.mkdir(parents=True, exist_ok=True)
+        _CACHE_DIR.mkdir(parents=True, exist_ok=True, mode=0o700)
         fd = os.open(str(_ORG_CACHE_FILE), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
         try:
             os.write(fd, org_id.encode())

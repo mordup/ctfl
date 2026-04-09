@@ -97,11 +97,16 @@ gh release create vX.Y.Z \
 
 Now that the tag is on GitHub, update the AUR package:
 
-1. Download the source tarball and compute the sha256sum:
+1. Download the source tarball, verify it twice (GitHub auto-generated tarballs can be unstable right after tag creation), and compute the sha256sum:
    ```bash
-   curl -sL https://github.com/mordup/ctfl/archive/refs/tags/vX.Y.Z.tar.gz | sha256sum
+   curl -sL https://github.com/mordup/ctfl/archive/refs/tags/vX.Y.Z.tar.gz -o /tmp/ctfl-vX.Y.Z.tar.gz
+   hash1=$(sha256sum /tmp/ctfl-vX.Y.Z.tar.gz | cut -d' ' -f1)
+   sleep 5
+   curl -sL https://github.com/mordup/ctfl/archive/refs/tags/vX.Y.Z.tar.gz | sha256sum | cut -d' ' -f1
+   # Verify both hashes match — if not, wait and retry until stable
+   rm /tmp/ctfl-vX.Y.Z.tar.gz
    ```
-2. Update `sha256sums` in `aur/PKGBUILD` with the new hash
+2. Update `sha256sums` in `aur/PKGBUILD` with the verified hash
 3. Regenerate `.SRCINFO`:
    ```bash
    cd aur && makepkg --printsrcinfo > .SRCINFO && cd ..

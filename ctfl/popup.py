@@ -20,8 +20,8 @@ from .constants import DATE_FMT_DISPLAY, DATE_FMT_ISO, ICON_THEME_NAME, TIME_FMT
 from .providers import RateLimitInfo, UsageData, format_cost, format_reset, format_tokens
 
 _PROGRESS_BAR_STYLE = (
-    "QProgressBar { background: #3a3a3a; border: none; border-radius: 5px; }"
-    "QProgressBar::chunk { background: #5B9BF6; border-radius: 5px; }"
+    "QProgressBar { background: #3a3a3a; border: none; border-radius: 3px; }"
+    "QProgressBar::chunk { background: #5B9BF6; border-radius: 3px; }"
 )
 
 
@@ -264,7 +264,7 @@ class PopupWidget(QWidget):
             bar_row.addWidget(lbl)
         bar = QProgressBar()
         bar.setRange(0, 100)
-        bar.setValue(int(info.utilization))
+        bar.setValue(round(info.utilization))
         bar.setTextVisible(False)
         bar.setFixedHeight(10)
         bar.setStyleSheet(_PROGRESS_BAR_STYLE)
@@ -401,10 +401,10 @@ class _BarChartWidget(QWidget):
             top.addWidget(detail)
             row_layout.addLayout(top)
 
-            # Bar
+            # Bar — normalize to 0-1000 to avoid 32-bit int overflow
             bar = QProgressBar()
-            bar.setRange(0, max_value)
-            bar.setValue(value)
+            bar.setRange(0, 1000)
+            bar.setValue(round(value / max_value * 1000) if max_value else 0)
             bar.setTextVisible(False)
             bar.setFixedHeight(10)
             bar.setStyleSheet(_PROGRESS_BAR_STYLE)

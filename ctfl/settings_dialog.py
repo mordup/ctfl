@@ -23,6 +23,8 @@ from .config import Config
 from .constants import COLOR_MUTED, FONT_SIZE_SMALL, ICON_THEME_NAME
 from .credentials import Credentials
 
+_PROFILE_AUTO = "auto"
+
 
 class SettingsDialog(QDialog):
     settings_changed = pyqtSignal()
@@ -67,6 +69,27 @@ class SettingsDialog(QDialog):
         source_layout.addWidget(self._rb_api)
         source_layout.addWidget(self._rb_both)
         left.addWidget(source_group)
+
+        # Profile (only visible when more than one instance is discovered)
+        from PyQt6.QtWidgets import QComboBox
+
+        from .providers.instance import discover_instances
+
+        instances = discover_instances()
+        self._profile_combo: QComboBox | None = None
+        if len(instances) > 1:
+            profile_group = QGroupBox("Profile")
+            profile_layout = QFormLayout(profile_group)
+            combo = QComboBox()
+            combo.addItem("Auto-detect", _PROFILE_AUTO)
+            for inst in instances:
+                combo.addItem(inst.name, str(inst.path))
+            profile_layout.addRow("Monitor:", combo)
+            hint = QLabel("Auto-detect follows the active CCS profile.")
+            hint.setStyleSheet(f"color: {COLOR_MUTED}; font-size: {FONT_SIZE_SMALL};")
+            profile_layout.addRow(hint)
+            left.addWidget(profile_group)
+            self._profile_combo = combo
 
         # API key
         api_group = QGroupBox("Admin API Key")
@@ -209,6 +232,13 @@ class SettingsDialog(QDialog):
         self._autostart_check.setChecked(self._autostart.is_enabled())
         self._update_check_spin.setValue(self._config.update_check_interval)
 
+        if self._profile_combo is not None:
+            current = self._config.profile
+            idx = self._profile_combo.findData(current)
+            if idx < 0:
+                idx = 0  # fall back to Auto-detect if pinned value is unknown
+            self._profile_combo.setCurrentIndex(idx)
+
         # Trigger initial state
         self._on_source_changed(self._source_buttons.checkedId(), True)
 
@@ -263,6 +293,10 @@ class SettingsDialog(QDialog):
 
         # Update check interval
         self._config.update_check_interval = self._update_check_spin.value()
+
+        # Profile
+        if self._profile_combo is not None:
+            self._config.profile = self._profile_combo.currentData()
 
         # Autostart
         try:

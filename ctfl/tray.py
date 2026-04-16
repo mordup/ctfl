@@ -26,6 +26,8 @@ from .providers.local import LocalProvider
 from .providers.oauth import OAuthUsageProvider
 from .settings_dialog import SettingsDialog
 
+_PROFILE_AUTO = "auto"
+
 _ICON_PATHS = [
     Path(f"/usr/share/icons/hicolor/scalable/apps/{ICON_THEME_NAME}.svg"),
     Path(__file__).resolve().parent / "icons" / f"{ICON_THEME_NAME}.svg",      # bundled in package
@@ -158,6 +160,8 @@ class TrayIcon(QSystemTrayIcon):
         refresh_action.triggered.connect(self.refresh)
         menu.addAction(refresh_action)
 
+        self._build_profile_menu(menu)
+
         settings_action = QAction("Settings", menu)
         settings_action.triggered.connect(self._show_settings)
         menu.addAction(settings_action)
@@ -183,6 +187,61 @@ class TrayIcon(QSystemTrayIcon):
         menu.addAction(quit_action)
 
         self.setContextMenu(menu)
+
+    def _build_profile_menu(self, parent_menu: QMenu) -> None:
+        from PyQt6.QtGui import QActionGroup
+
+        from .providers.instance import discover_instances
+
+        instances = discover_instances()
+        # Only show the submenu when there is a real choice (more than one
+        # data directory on disk). Otherwise it would just clutter the menu.
+        if len(instances) <= 1:
+            return
+
+        submenu = parent_menu.addMenu("Profile")
+        self._profile_group = QActionGroup(submenu)
+        self._profile_group.setExclusive(True)
+        current = self._config.profile
+
+        auto_action = QAction("Auto-detect", submenu)
+        auto_action.setCheckable(True)
+        auto_action.setChecked(current == _PROFILE_AUTO)
+        auto_action.setData(_PROFILE_AUTO)
+        auto_action.triggered.connect(lambda: self._on_profile_selected(_PROFILE_AUTO))
+        self._profile_group.addAction(auto_action)
+        submenu.addAction(auto_action)
+        submenu.addSeparator()
+
+        for inst in instances:
+            path_str = str(inst.path)
+            action = QAction(inst.name, submenu)
+            action.setCheckable(True)
+            action.setChecked(current == path_str)
+            action.setData(path_str)
+            action.triggered.connect(
+                lambda _checked=False, p=path_str: self._on_profile_selected(p)
+            )
+            self._profile_group.addAction(action)
+            submenu.addAction(action)
+
+    def _on_profile_selected(self, value: str) -> None:
+        if self._config.profile == value:
+            return
+        self._config.profile = value
+        self.refresh()
+
+    def _sync_profile_menu(self) -> None:
+        """Reflect the current `config.profile` value in the tray submenu.
+        Called after Settings dialog changes, since the dialog writes the
+        same config key but doesn't touch the menu's QActions directly.
+        """
+        group = getattr(self, "_profile_group", None)
+        if group is None:
+            return
+        current = self._config.profile
+        for action in group.actions():
+            action.setChecked(action.data() == current)
 
     def _on_activated(self, reason: QSystemTrayIcon.ActivationReason) -> None:
         if reason == QSystemTrayIcon.ActivationReason.Trigger:
@@ -235,12 +294,21 @@ class TrayIcon(QSystemTrayIcon):
 
     def _update_tooltip(self, data: UsageData) -> None:
         from .providers import format_cost, format_reset, format_tokens
+        from .providers.instance import discover_instances, resolve_profile
         from .providers.oauth import read_plan_name
 
-        # Header: app name + plan
-        plan = read_plan_name()
-        header = f"{APP_DISPLAY_NAME} — {plan}" if plan else APP_DISPLAY_NAME
-        lines = [header]
+        # Line 1: app name. Line 2 (optional): plan and/or active profile.
+        lines = [APP_DISPLAY_NAME]
+        plan = read_plan_name(self._config)
+        subheader_parts: list[str] = []
+        if plan:
+            subheader_parts.append(plan)
+        if len(discover_instances()) > 1:
+            active = resolve_profile(self._config)
+            marker = " (auto)" if self._config.profile == _PROFILE_AUTO else ""
+            subheader_parts.append(f"{active.name}{marker}")
+        if subheader_parts:
+            lines.append(" · ".join(subheader_parts))
 
         # Second line: today + sync time
         sync_time = f"synced {datetime.now().strftime(TIME_FMT_HM)}" \
@@ -510,6 +578,7 @@ class TrayIcon(QSystemTrayIcon):
     def _on_settings_changed(self) -> None:
         self._start_timer()
         self._start_update_timer()
+        self._sync_profile_menu()
         self.refresh()
 
     def _start_timer(self) -> None:

@@ -6,21 +6,45 @@ import os
 import time
 from collections.abc import Callable
 from pathlib import Path
+from typing import TYPE_CHECKING
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
 from . import RateLimitInfo, UsageData
+from .instance import resolve_profile
 
-CREDENTIALS_FILE = Path.home() / ".claude" / ".credentials.json"
+if TYPE_CHECKING:
+    from ..config import Config
+
 _OAUTH_URL = "https://api.anthropic.com/api/oauth/usage"
 _TOKEN_URL = "https://platform.claude.com/v1/oauth/token"
 _CLIENT_ID = "9d1c250a-e61b-44d9-88ed-5944d1962f5e"
 _CLAUDE_BASE = "https://claude.ai/api"
 _CACHE_DIR = Path.home() / ".cache" / "ctfl"
-_CACHE_FILE = _CACHE_DIR / "oauth_limits.json"
-_ORG_CACHE_FILE = _CACHE_DIR / "org_id.txt"
 _TOKEN_EXPIRY_BUFFER = 300  # refresh 5 min before expiry
+
+
+def _profile_cache_suffix(credentials_file: Path) -> str:
+    """Short stable suffix derived from the credentials path so per-profile
+    caches (rate limits, org id) don't leak between accounts.
+    """
+    import hashlib
+
+    # Non-cryptographic use: just a stable short suffix that differs between
+    # profiles. Flagged as usedforsecurity=False to silence Bandit/Ruff S324.
+    digest = hashlib.sha1(
+        str(credentials_file.parent).encode(), usedforsecurity=False
+    ).hexdigest()[:8]
+    return digest
+
+
+def _limits_cache_file(credentials_file: Path) -> Path:
+    return _CACHE_DIR / f"oauth_limits_{_profile_cache_suffix(credentials_file)}.json"
+
+
+def _org_cache_file(credentials_file: Path) -> Path:
+    return _CACHE_DIR / f"org_id_{_profile_cache_suffix(credentials_file)}.txt"
 
 _KEY_LABELS = {
     "five_hour": "Session",
@@ -37,12 +61,17 @@ _PLAN_LABELS = {
 }
 
 
-def read_plan_name() -> str | None:
+def _resolve_credentials_file(config: Config | None) -> Path:
+    return resolve_profile(config).credentials_file
+
+
+def read_plan_name(config: Config | None = None) -> str | None:
     """Read the short plan name from Claude credentials."""
-    if not CREDENTIALS_FILE.exists():
+    credentials_file = _resolve_credentials_file(config)
+    if not credentials_file.exists():
         return None
     try:
-        with open(CREDENTIALS_FILE) as f:
+        with open(credentials_file) as f:
             data = json.load(f)
         oauth = data.get("claudeAiOauth", {})
         tier = oauth.get("rateLimitTier", "")
@@ -59,26 +88,27 @@ def _is_expired(expires_at_ms: int) -> bool:
     return now_ms >= expires_at_ms - _TOKEN_EXPIRY_BUFFER * 1000
 
 
-def _save_limits_cache(limits: list[RateLimitInfo]) -> None:
+def _save_limits_cache(credentials_file: Path, limits: list[RateLimitInfo]) -> None:
     try:
         _CACHE_DIR.mkdir(parents=True, exist_ok=True, mode=0o700)
         data = [{"name": li.name, "utilization": li.utilization,
                  "resets_at": li.resets_at, "window_key": li.window_key}
                 for li in limits]
-        tmp = _CACHE_FILE.with_suffix(".tmp")
+        cache_file = _limits_cache_file(credentials_file)
+        tmp = cache_file.with_suffix(".tmp")
         fd = os.open(str(tmp), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
         try:
             os.write(fd, json.dumps(data).encode())
         finally:
             os.close(fd)
-        tmp.rename(_CACHE_FILE)
+        tmp.rename(cache_file)
     except OSError:
         pass
 
 
-def _load_limits_cache() -> list[RateLimitInfo]:
+def _load_limits_cache(credentials_file: Path) -> list[RateLimitInfo]:
     try:
-        data = json.loads(_CACHE_FILE.read_text())
+        data = json.loads(_limits_cache_file(credentials_file).read_text())
         return [RateLimitInfo(**entry) for entry in data]
     except (OSError, json.JSONDecodeError, TypeError):
         return []
@@ -103,10 +133,11 @@ def _parse_limits(data: dict) -> list[RateLimitInfo]:
     return limits
 
 
-def _save_org_id(org_id: str) -> None:
+def _save_org_id(credentials_file: Path, org_id: str) -> None:
     try:
         _CACHE_DIR.mkdir(parents=True, exist_ok=True, mode=0o700)
-        fd = os.open(str(_ORG_CACHE_FILE), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        cache_file = _org_cache_file(credentials_file)
+        fd = os.open(str(cache_file), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
         try:
             os.write(fd, org_id.encode())
         finally:
@@ -115,9 +146,9 @@ def _save_org_id(org_id: str) -> None:
         pass
 
 
-def _load_org_id() -> str | None:
+def _load_org_id(credentials_file: Path) -> str | None:
     try:
-        return _ORG_CACHE_FILE.read_text().strip() or None
+        return _org_cache_file(credentials_file).read_text().strip() or None
     except OSError:
         return None
 
@@ -127,55 +158,63 @@ class OAuthUsageProvider:
         self,
         get_session_key: Callable[[], str | None] = lambda: None,
         get_cf_clearance: Callable[[], str | None] = lambda: None,
+        config: Config | None = None,
     ) -> None:
         self._get_session_key = get_session_key
         self._get_cf_clearance = get_cf_clearance
+        self._config = config
+
+    def _credentials_file(self) -> Path:
+        return _resolve_credentials_file(self._config)
 
     def fetch(self, days: int = 0) -> UsageData:
+        credentials_file = self._credentials_file()
         # Try session key first (claude.ai browser cookie)
         session_key = self._get_session_key()
         if session_key:
             try:
                 cf_clearance = self._get_cf_clearance()
-                result = self._fetch_via_session(session_key, cf_clearance)
+                result = self._fetch_via_session(credentials_file, session_key, cf_clearance)
                 if result.limits:
-                    _save_limits_cache(result.limits)
+                    _save_limits_cache(credentials_file, result.limits)
                 return result
             except (HTTPError, URLError, OSError):
                 pass  # fall through to OAuth
 
         # Fall back to OAuth token
         try:
-            token = self._read_oauth_token()
+            token = self._read_oauth_token(credentials_file)
             if not token:
-                cached = _load_limits_cache()
+                cached = _load_limits_cache(credentials_file)
                 if cached:
                     return UsageData(limits=cached)
                 return UsageData()
             result = self._fetch_via_oauth(token)
             if result.limits:
-                _save_limits_cache(result.limits)
+                _save_limits_cache(credentials_file, result.limits)
             return result
         except HTTPError as e:
             if e.code in (401, 403):
                 return UsageData(error="Session expired, re-login to claude.ai")
-            cached = _load_limits_cache()
+            cached = _load_limits_cache(credentials_file)
             if cached:
                 return UsageData(limits=cached)
             return UsageData(error=f"OAuth: HTTP {e.code}")
         except (URLError, OSError):
-            cached = _load_limits_cache()
+            cached = _load_limits_cache(credentials_file)
             if cached:
                 return UsageData(limits=cached)
             return UsageData(error="Network error")
         except Exception as e:
             return UsageData(error=f"OAuth: {e}")
 
-    def _read_oauth_token(self) -> str | None:
-        if not CREDENTIALS_FILE.exists():
+    def _read_oauth_token(self, credentials_file: Path | None = None) -> str | None:
+        if credentials_file is None:
+            credentials_file = self._credentials_file()
+        if not credentials_file.exists():
             return None
         try:
-            with open(CREDENTIALS_FILE) as f:
+            with open(credentials_file) as f:
                 data = json.load(f)
             oauth = data.get("claudeAiOauth", {})
             token = oauth.get("accessToken")
@@ -183,14 +222,14 @@ class OAuthUsageProvider:
                 return None
             expires_at = oauth.get("expiresAt")
             if expires_at and _is_expired(expires_at):
-                refreshed = self._refresh_token(data, oauth)
+                refreshed = self._refresh_token(credentials_file, data, oauth)
                 if refreshed:
                     return refreshed
             return token
         except (json.JSONDecodeError, OSError):
             return None
 
-    def _refresh_token(self, creds_data: dict, oauth: dict) -> str | None:
+    def _refresh_token(self, credentials_file: Path, creds_data: dict, oauth: dict) -> str | None:
         refresh_token = oauth.get("refreshToken")
         if not refresh_token:
             return None
@@ -218,21 +257,21 @@ class OAuthUsageProvider:
                 oauth["expiresAt"] = int(time.time() * 1000) + expires_in * 1000
             org_info = result.get("organization")
             if org_info and org_info.get("uuid"):
-                _save_org_id(org_info["uuid"])
-            lock_fd = os.open(str(CREDENTIALS_FILE), os.O_RDONLY)
+                _save_org_id(credentials_file, org_info["uuid"])
+            lock_fd = os.open(str(credentials_file), os.O_RDONLY)
             try:
                 fcntl.flock(lock_fd, fcntl.LOCK_EX)
                 # Re-read credentials under lock in case Claude CLI modified them
-                with open(CREDENTIALS_FILE) as f:
+                with open(credentials_file) as f:
                     creds_data = json.load(f)
                 creds_data["claudeAiOauth"] = oauth
-                tmp = CREDENTIALS_FILE.with_suffix(".tmp")
+                tmp = credentials_file.with_suffix(".tmp")
                 fd = os.open(str(tmp), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
                 try:
                     os.write(fd, json.dumps(creds_data, indent=2).encode())
                 finally:
                     os.close(fd)
-                tmp.rename(CREDENTIALS_FILE)
+                tmp.rename(credentials_file)
             finally:
                 fcntl.flock(lock_fd, fcntl.LOCK_UN)
                 os.close(lock_fd)
@@ -240,16 +279,20 @@ class OAuthUsageProvider:
         except (HTTPError, URLError, OSError, json.JSONDecodeError, KeyError):
             return None
 
-    def _fetch_via_session(self, session_key: str, cf_clearance: str | None) -> UsageData:
-        org_id = self._get_org_id(session_key, cf_clearance)
+    def _fetch_via_session(
+        self, credentials_file: Path, session_key: str, cf_clearance: str | None
+    ) -> UsageData:
+        org_id = self._get_org_id(credentials_file, session_key, cf_clearance)
         headers = self._session_headers(session_key, cf_clearance)
         req = Request(f"{_CLAUDE_BASE}/organizations/{org_id}/usage", headers=headers)
         with urlopen(req, timeout=15) as resp:
             data = json.loads(resp.read())
         return UsageData(limits=_parse_limits(data))
 
-    def _get_org_id(self, session_key: str, cf_clearance: str | None) -> str:
-        cached = _load_org_id()
+    def _get_org_id(
+        self, credentials_file: Path, session_key: str, cf_clearance: str | None
+    ) -> str:
+        cached = _load_org_id(credentials_file)
         if cached:
             return cached
         headers = self._session_headers(session_key, cf_clearance)
@@ -259,7 +302,7 @@ class OAuthUsageProvider:
         if not orgs:
             raise ValueError("No organizations found")
         org_id = orgs[0]["uuid"]
-        _save_org_id(org_id)
+        _save_org_id(credentials_file, org_id)
         return org_id
 
     @staticmethod

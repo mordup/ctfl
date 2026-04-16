@@ -40,7 +40,9 @@ def main() -> int:
     autostart = Autostart()
     local_provider = LocalProvider(config)
     api_provider = ApiProvider(credentials.get_api_key)
-    oauth_provider = OAuthUsageProvider(credentials.get_session_key, credentials.get_cf_clearance)
+    oauth_provider = OAuthUsageProvider(
+        credentials.get_session_key, credentials.get_cf_clearance, config=config
+    )
 
     tray = TrayIcon(config, credentials, autostart, local_provider, api_provider, oauth_provider)
     tray.show()

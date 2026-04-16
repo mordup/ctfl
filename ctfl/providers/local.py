@@ -8,19 +8,16 @@ from typing import TYPE_CHECKING
 
 from ..constants import DATE_FMT_ISO
 from . import DailyUsage, ModelTokens, ProjectUsage, UsageData
+from .instance import resolve_profile
 
 if TYPE_CHECKING:
     from ..config import Config
-
-CLAUDE_DIR = Path.home() / ".claude"
-STATS_FILE = CLAUDE_DIR / "stats-cache.json"
-PROJECTS_DIR = CLAUDE_DIR / "projects"
 
 
 def _resolve_project_name(project_path: Path) -> str:
     """Derive a human-readable name for a project directory.
 
-    The directory name under ~/.claude/projects/ is a path-encoded string
+    The directory name under <instance>/projects/ is a path-encoded string
     like '-home-morgan-Projects-ctfl'. We can't simply replace - with /
     because path components may contain hyphens (e.g. 'my-project').
     Walk the filesystem to reconstruct the real path.
@@ -73,8 +70,12 @@ class LocalProvider:
             return UsageData(error=f"Local: {e}")
 
     def _fetch(self, days: int) -> UsageData:
+        instance = resolve_profile(self._config)
+        stats_file = instance.stats_file
+        projects_dir = instance.projects_dir
+
         cutoff_date = (datetime.now(UTC) - timedelta(days=days)).strftime(DATE_FMT_ISO)
-        cache_data = self._read_stats_cache()
+        cache_data = self._read_stats_cache(stats_file)
         cache_cutoff = cache_data.get("lastComputedDate", "")
 
         # Build daily data from cache
@@ -121,7 +122,7 @@ class LocalProvider:
 
         # Scan JSONL files for data after cache cutoff
         jsonl_daily, jsonl_models, by_project, daily_model_tokens = self._scan_jsonl_files(
-            cache_cutoff, cutoff_date
+            projects_dir, cache_cutoff, cutoff_date
         )
 
         # JSONL data takes precedence for overlapping dates
@@ -158,17 +159,17 @@ class LocalProvider:
 
         return UsageData(daily=daily_list, by_model=model_list, by_project=by_project)
 
-    def _read_stats_cache(self) -> dict:
-        if not STATS_FILE.exists():
+    def _read_stats_cache(self, stats_file: Path) -> dict:
+        if not stats_file.exists():
             return {}
         try:
-            with open(STATS_FILE) as f:
+            with open(stats_file) as f:
                 return json.load(f)
         except (json.JSONDecodeError, OSError):
             return {}
 
     def _scan_jsonl_files(
-        self, cache_cutoff: str, cutoff_date: str
+        self, projects_dir: Path, cache_cutoff: str, cutoff_date: str
     ) -> tuple[dict[str, DailyUsage], dict[str, ModelTokens], list[ProjectUsage],
                dict[str, dict[str, tuple[int, int, int, int]]]]:
         daily_map: dict[str, DailyUsage] = {}
@@ -182,7 +183,7 @@ class LocalProvider:
             lambda: defaultdict(lambda: [0, 0, 0, 0])
         )
 
-        if not PROJECTS_DIR.exists():
+        if not projects_dir.exists():
             return daily_map, dict(model_totals), [], {}
 
         # Find all JSONL files, filter by mtime for performance
@@ -198,7 +199,7 @@ class LocalProvider:
 
         jsonl_files: list[Path] = []
         for pattern in ["*/*.jsonl", "*/*/subagents/*.jsonl"]:
-            for p in PROJECTS_DIR.glob(pattern):
+            for p in projects_dir.glob(pattern):
                 try:
                     if p.stat().st_mtime >= cutoff_ts:
                         jsonl_files.append(p)
@@ -208,7 +209,7 @@ class LocalProvider:
         for filepath in jsonl_files:
             # Determine project directory from file path
             try:
-                rel = filepath.relative_to(PROJECTS_DIR)
+                rel = filepath.relative_to(projects_dir)
                 project_dir = rel.parts[0]
             except (ValueError, IndexError):
                 project_dir = ""
@@ -265,7 +266,7 @@ class LocalProvider:
         # Build project usage list
         projects = []
         for project_dir, agg in project_agg.items():
-            name = _resolve_project_name(PROJECTS_DIR / project_dir)
+            name = _resolve_project_name(projects_dir / project_dir)
             projects.append(ProjectUsage(
                 name=name,
                 path=project_dir,

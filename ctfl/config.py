@@ -125,3 +125,17 @@ class Config:
     def update_check_interval(self, v: int) -> None:
         self._s.setValue("update_check_interval", v)
 
+    @property
+    def profile(self) -> str:
+        """Which Claude data directory to monitor.
+
+        "auto" (default) detects the active instance via running processes
+        and JSONL activity. Any other value is an absolute path to pin a
+        specific instance (e.g. "/home/morgan/.ccs/instances/personal").
+        """
+        return self._get("profile", "auto")
+
+    @profile.setter
+    def profile(self, v: str) -> None:
+        self._s.setValue("profile", v)
+

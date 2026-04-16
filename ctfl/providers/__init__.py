@@ -71,6 +71,14 @@ class UsageData:
     by_model: list[ModelTokens] = field(default_factory=list)
     by_project: list[ProjectUsage] = field(default_factory=list)
     limits: list[RateLimitInfo] = field(default_factory=list)
+    # Sum of token cost from assistant messages where the input context
+    # (input + cache_read + cache_creation) was at or above LONG_CONTEXT_THRESHOLD.
+    # Used as the numerator of "% of tokens spent at long context".
+    long_context_tokens: int = 0
+    # Total token cost summed over the same scan window as long_context_tokens.
+    # Denominator for the ratio; kept separate from the sum of `daily` because
+    # stats-cache-era days don't contribute per-message context size.
+    long_context_total_tokens: int = 0
     error: str | None = None
 
 

@@ -32,6 +32,9 @@ _PROGRESS_BAR_STYLE = (
     f"QProgressBar::chunk {{ background: {COLOR_ACCENT}; border-radius: 3px; }}"
 )
 
+# Below this ratio the /compact hint is noise; suppress the whole line.
+_LONG_CONTEXT_DISPLAY_MIN_RATIO = 0.15
+
 
 class PopupWidget(QWidget):
     refresh_requested = pyqtSignal()
@@ -121,6 +124,22 @@ class PopupWidget(QWidget):
         if total_cost:
             total_text += f" · {format_cost(total_cost)}"
         parts.append(total_text)
+
+        # Long-context usage insight: compute over the same window the metric
+        # was accumulated in (JSONL-scan window), not the full period total,
+        # so stats-cache-era days don't skew the denominator down.
+        if data.long_context_total_tokens and data.long_context_tokens:
+            ratio = data.long_context_tokens / data.long_context_total_tokens
+            if ratio >= _LONG_CONTEXT_DISPLAY_MIN_RATIO:
+                pct = round(ratio * 100)
+                hint = (
+                    f"<span style='color: {COLOR_MUTED}; font-size: {FONT_SIZE_SMALL};'>"
+                    f"{pct}% of tokens used at &gt;150k context · "
+                    f"<code>/compact</code> mid-task, <code>/clear</code> between tasks"
+                    f"</span>"
+                )
+                parts.append(hint)
+
         html = "".join(f"<p style='margin: 2px 0;'>{p}</p>" for p in parts)
         self._summary_label.setText(html)
 

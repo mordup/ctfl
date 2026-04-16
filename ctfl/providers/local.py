@@ -50,6 +50,13 @@ def _resolve_project_name(project_path: Path) -> str:
 
 _MAX_CACHE_ENTRIES = 200
 
+# Messages whose input context (input + cache_read + cache_creation) is at or
+# above this threshold contribute their full token cost to the
+# long_context_tokens metric. 150k is used by Claude Code's /stats dialog and
+# corresponds to ~75% of the 200k context window — past this point, /compact
+# or /clear noticeably reduce burn.
+LONG_CONTEXT_THRESHOLD = 150_000
+
 
 class LocalProvider:
     def __init__(self, config: Config | None = None) -> None:
@@ -121,9 +128,14 @@ class LocalProvider:
             )
 
         # Scan JSONL files for data after cache cutoff
-        jsonl_daily, jsonl_models, by_project, daily_model_tokens = self._scan_jsonl_files(
-            projects_dir, cache_cutoff, cutoff_date
-        )
+        (
+            jsonl_daily,
+            jsonl_models,
+            by_project,
+            daily_model_tokens,
+            long_context_tokens,
+            long_context_total,
+        ) = self._scan_jsonl_files(projects_dir, cache_cutoff, cutoff_date)
 
         # JSONL data takes precedence for overlapping dates
         for date_str, day in jsonl_daily.items():
@@ -157,7 +169,13 @@ class LocalProvider:
             reverse=True,
         )
 
-        return UsageData(daily=daily_list, by_model=model_list, by_project=by_project)
+        return UsageData(
+            daily=daily_list,
+            by_model=model_list,
+            by_project=by_project,
+            long_context_tokens=long_context_tokens,
+            long_context_total_tokens=long_context_total,
+        )
 
     def _read_stats_cache(self, stats_file: Path) -> dict:
         if not stats_file.exists():
@@ -171,7 +189,7 @@ class LocalProvider:
     def _scan_jsonl_files(
         self, projects_dir: Path, cache_cutoff: str, cutoff_date: str
     ) -> tuple[dict[str, DailyUsage], dict[str, ModelTokens], list[ProjectUsage],
-               dict[str, dict[str, tuple[int, int, int, int]]]]:
+               dict[str, dict[str, tuple[int, int, int, int]]], int, int]:
         daily_map: dict[str, DailyUsage] = {}
         model_totals: dict[str, ModelTokens] = defaultdict(
             lambda: ModelTokens(model="")
@@ -182,9 +200,11 @@ class LocalProvider:
         daily_model_tokens: dict[str, dict[str, list[int]]] = defaultdict(
             lambda: defaultdict(lambda: [0, 0, 0, 0])
         )
+        long_context_tokens = 0
+        long_context_total = 0
 
         if not projects_dir.exists():
-            return daily_map, dict(model_totals), [], {}
+            return daily_map, dict(model_totals), [], {}, 0, 0
 
         # Find all JSONL files, filter by mtime for performance
         if cache_cutoff:
@@ -224,6 +244,12 @@ class LocalProvider:
 
                 model = rec["model"]
                 rec_tokens = rec["input_tokens"] + rec["output_tokens"] + rec["cache_read"] + rec["cache_creation"]
+                # Context size = the full prompt sent to the model (input +
+                # all cached portions). Output is not part of the context.
+                context_size = rec["input_tokens"] + rec["cache_read"] + rec["cache_creation"]
+                long_context_total += rec_tokens
+                if context_size >= LONG_CONTEXT_THRESHOLD:
+                    long_context_tokens += rec_tokens
 
                 if date_str not in daily_map:
                     daily_map[date_str] = DailyUsage(date=date_str)
@@ -280,7 +306,7 @@ class LocalProvider:
             date: {m: tuple(v) for m, v in models.items()}  # type: ignore[misc]
             for date, models in daily_model_tokens.items()
         }
-        return daily_map, dict(model_totals), projects, dmt_out
+        return daily_map, dict(model_totals), projects, dmt_out, long_context_tokens, long_context_total
 
     def _parse_jsonl(self, filepath: Path) -> list[dict]:
         try:

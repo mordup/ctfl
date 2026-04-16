@@ -148,16 +148,17 @@ class PopupWidget(QWidget):
             total_text += f" · {format_cost(total_cost)}"
         parts.append(total_text)
 
-        # Long-context usage insight: compute over the same window the metric
-        # was accumulated in (JSONL-scan window), not the full period total,
-        # so stats-cache-era days don't skew the denominator down.
+        # Long-context usage insight: the ratio is computed over the
+        # JSONL-scan window (recent sessions), not the full period —
+        # stats-cache-era days lack per-message context size. The label
+        # says "Recent sessions" to make that scope explicit to the user.
         if data.long_context_total_tokens and data.long_context_tokens:
             ratio = data.long_context_tokens / data.long_context_total_tokens
             if ratio >= _LONG_CONTEXT_DISPLAY_MIN_RATIO:
                 pct = round(ratio * 100)
                 hint = (
                     f"<span style='color: {COLOR_MUTED}; font-size: {FONT_SIZE_SMALL};'>"
-                    f"{pct}% of tokens used at &gt;150k context · "
+                    f"Recent sessions: {pct}% of tokens used at &gt;150k context · "
                     f"<code>/compact</code> mid-task, <code>/clear</code> between tasks"
                     f"</span>"
                 )

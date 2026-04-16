@@ -225,6 +225,10 @@ class TrayIcon(QSystemTrayIcon):
             self._profile_group.addAction(action)
             submenu.addAction(action)
 
+        # Handle the case where current is a stale pinned path that doesn't
+        # match any discovered instance: show Auto-detect as checked.
+        self._sync_profile_menu()
+
     def _on_profile_selected(self, value: str) -> None:
         if self._config.profile == value:
             return
@@ -240,8 +244,20 @@ class TrayIcon(QSystemTrayIcon):
         if group is None:
             return
         current = self._config.profile
+        matched = False
         for action in group.actions():
-            action.setChecked(action.data() == current)
+            is_match = action.data() == current
+            action.setChecked(is_match)
+            if is_match:
+                matched = True
+        # Pinned path no longer matches a discovered instance (e.g., the
+        # CCS instance directory was removed). Resolution already falls
+        # back to auto-detect, so mirror that in the menu.
+        if not matched:
+            for action in group.actions():
+                if action.data() == _PROFILE_AUTO:
+                    action.setChecked(True)
+                    break
 
     def _on_activated(self, reason: QSystemTrayIcon.ActivationReason) -> None:
         if reason == QSystemTrayIcon.ActivationReason.Trigger:
@@ -410,9 +426,10 @@ class TrayIcon(QSystemTrayIcon):
             providers.append(self._local)
         if source in ("api", "both"):
             providers.append(self._api)
-        # Only fetch OAuth rate limits when they'll actually be shown
-        if self._config.tooltip_limits or self._config.rate_limit_warning:
-            providers.append(self._oauth)
+        # Always fetch OAuth rate limits so the popup's Plan usage limits
+        # section has data. Tooltip/notification toggles only gate display,
+        # not retrieval.
+        providers.append(self._oauth)
         return providers
 
     def _check_for_updates(self) -> None:

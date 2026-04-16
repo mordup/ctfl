@@ -10,6 +10,7 @@ from PyQt6.QtWidgets import (
     QLabel,
     QProgressBar,
     QPushButton,
+    QScrollArea,
     QTabWidget,
     QVBoxLayout,
     QWidget,
@@ -34,6 +35,26 @@ _PROGRESS_BAR_STYLE = (
 
 # Below this ratio the /compact hint is noise; suppress the whole line.
 _LONG_CONTEXT_DISPLAY_MIN_RATIO = 0.15
+
+# Maximum pixel height of the tab content area. Sized to comfortably display
+# ~7 rows (label + bar + breakdown per row). Beyond that, a scrollbar
+# appears inside the tab instead of the popup growing off-screen. Below
+# that, the area shrinks to fit — so sparse data doesn't leave a tall
+# empty panel.
+_TAB_CONTENT_MAX_HEIGHT = 380
+
+
+def _wrap_in_scroll(widget: QWidget) -> QScrollArea:
+    """Put a chart widget in a vertically scrollable frame capped at
+    _TAB_CONTENT_MAX_HEIGHT. Shrinks to content when smaller.
+    """
+    area = QScrollArea()
+    area.setWidget(widget)
+    area.setWidgetResizable(True)
+    area.setFrameShape(QScrollArea.Shape.NoFrame)
+    area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+    area.setMaximumHeight(_TAB_CONTENT_MAX_HEIGHT)
+    return area
 
 
 class PopupWidget(QWidget):
@@ -69,14 +90,16 @@ class PopupWidget(QWidget):
         self._summary_label = QLabel()
         layout.addWidget(self._summary_label)
 
-        # Tabs
+        # Tabs — popup sizes to content, but each tab's content is capped at
+        # _TAB_CONTENT_MAX_HEIGHT so long lists scroll instead of overflowing
+        # the screen.
         self._tabs = QTabWidget()
         self._daily_chart = _BarChartWidget()
         self._model_chart = _BarChartWidget()
         self._project_chart = _BarChartWidget()
-        self._tabs.addTab(self._daily_chart, "Daily")
-        self._tabs.addTab(self._model_chart, "By Model")
-        self._tabs.addTab(self._project_chart, "By Project")
+        self._tabs.addTab(_wrap_in_scroll(self._daily_chart), "Daily")
+        self._tabs.addTab(_wrap_in_scroll(self._model_chart), "By Model")
+        self._tabs.addTab(_wrap_in_scroll(self._project_chart), "By Project")
         self._tabs.currentChanged.connect(lambda _: self._fit_to_content())
         layout.addWidget(self._tabs)
 
@@ -189,6 +212,30 @@ class PopupWidget(QWidget):
 
         self._update_status()
         self._fit_to_content()
+
+    def _fit_to_content(self) -> None:
+        # Size the popup to fit the active tab's content, up to the scroll
+        # area's max height. When content exceeds the max, the scrollbar
+        # inside the tab takes over and the popup caps at that height.
+        active_scroll = self._tabs.currentWidget()
+        inner = active_scroll.widget() if isinstance(active_scroll, QScrollArea) else None
+        if inner is not None:
+            # sizeHint() of the inner widget reflects rows * row_height + padding.
+            content_h = inner.sizeHint().height()
+            capped = min(content_h, _TAB_CONTENT_MAX_HEIGHT)
+            tab_bar_h = self._tabs.tabBar().sizeHint().height()
+            self._tabs.setFixedHeight(capped + tab_bar_h + 8)
+        if self.isVisible():
+            # Don't shrink while visible — avoid yanking the window out from
+            # under the user's cursor on tab switch. Only grow if needed.
+            current = self.size()
+            ideal = self.sizeHint()
+            if ideal.height() > current.height() or ideal.width() > current.width():
+                self.resize(max(current.width(), ideal.width()),
+                            max(current.height(), ideal.height()))
+        else:
+            self.adjustSize()
+        self._tabs.setMaximumHeight(16777215)
 
     def _update_limits(self, limits: list[RateLimitInfo]) -> None:
         # Clear previous widgets
@@ -311,28 +358,6 @@ class PopupWidget(QWidget):
         self._status_label.setText(
             f"Last updated: {_dt.now().strftime(TIME_FMT_HM)}"
         )
-
-    def _fit_to_content(self) -> None:
-        # Size the tab widget to exactly fit the active tab content.
-        active = self._tabs.currentWidget()
-        if active:
-            hint = active.sizeHint()
-            tab_bar_h = self._tabs.tabBar().sizeHint().height()
-            needed = hint.height() + tab_bar_h + 8
-        else:
-            needed = 0
-        self._tabs.setFixedHeight(max(needed, self._tabs.minimumSizeHint().height()))
-        if self.isVisible():
-            # Don't shrink while visible — only grow if needed
-            current = self.size()
-            ideal = self.sizeHint()
-            if ideal.width() > current.width() or ideal.height() > current.height():
-                self.resize(max(current.width(), ideal.width()),
-                            max(current.height(), ideal.height()))
-        else:
-            self.adjustSize()
-        # Restore flexibility for future resizes
-        self._tabs.setMaximumHeight(16777215)
 
     def show_loading(self) -> None:
         self._summary_label.setText("Loading...")

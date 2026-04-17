@@ -12,14 +12,21 @@ def format_cost(usd: float) -> str:
 def format_credits(cents: int | None, currency: str | None = "USD") -> str:
     """Format minor-unit credit amounts (e.g. USD cents) as a display string.
     Drops fractional cents on round-dollar values (e.g. $1,000 not $1,000.00).
+    Non-USD currencies render as "1,234.56 EUR" since we don't carry symbol
+    tables. Zero-decimal currencies (JPY, etc.) aren't special-cased — the
+    observed Enterprise API returns USD.
     """
     if cents is None:
         return ""
     amount = cents / 100
-    symbol = "$" if (currency or "USD").upper() == "USD" else ""
+    code = (currency or "USD").upper()
+    if code == "USD":
+        if amount == int(amount):
+            return f"${int(amount):,}"
+        return f"${amount:,.2f}"
     if amount == int(amount):
-        return f"{symbol}{int(amount):,}"
-    return f"{symbol}{amount:,.2f}"
+        return f"{int(amount):,} {code}"
+    return f"{amount:,.2f} {code}"
 
 
 def format_tokens(n: int) -> str:

@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
-# PreToolUse guard — blocks reads/writes on sensitive files by basename
-# pattern. Complements the static deny rules in settings.json: static
-# globs miss symlinks and some relative-path variants, pattern matching
-# catches them.
+# PreToolUse guard — blocks reads/writes on sensitive files by path
+# pattern. Complements the static deny rules in settings.json by
+# covering a wider pattern set (SSH keys, GPG, .netrc, .pgpass). Path
+# matching is string-based and does not follow symlinks.
+
+command -v jq >/dev/null 2>&1 || exit 2  # fail closed if jq is missing
 
 input="$(cat 2>/dev/null || true)"
 path="$(printf '%s' "$input" | jq -r '.tool_input.file_path // .tool_input.path // empty' 2>/dev/null)"

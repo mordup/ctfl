@@ -160,18 +160,26 @@ def _parse_limits(data: dict) -> list[RateLimitInfo]:
         ))
 
     extra = data.get("extra_usage")
-    if extra and extra.get("is_enabled"):
+    if isinstance(extra, dict) and extra.get("is_enabled"):
         utilization = extra.get("utilization")
         monthly_limit = extra.get("monthly_limit")
         used_credits = extra.get("used_credits")
-        if utilization is not None and monthly_limit is not None and used_credits is not None:
+        # Skip NaN utilization (util != util) and zero/missing limit;
+        # round() on fractional cents in case the API drops to float.
+        if (
+            utilization is not None
+            and monthly_limit is not None
+            and used_credits is not None
+            and float(utilization) == float(utilization)
+            and int(monthly_limit) > 0
+        ):
             utilization = max(0.0, min(100.0, float(utilization)))
             limits.append(RateLimitInfo(
                 name="Monthly spend",
                 utilization=utilization,
                 resets_at=_first_of_next_month_utc(),
                 window_key=_MONTHLY_SPEND_KEY,
-                used_credits=int(used_credits),
+                used_credits=round(float(used_credits)),
                 monthly_limit=int(monthly_limit),
                 currency=extra.get("currency") or "USD",
             ))

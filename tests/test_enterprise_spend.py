@@ -69,6 +69,53 @@ def test_parse_limits_enterprise_missing_fields():
     assert _parse_limits(payload) == []
 
 
+def test_parse_limits_enterprise_tolerates_non_dict_extra_usage():
+    # Malformed API payload (extra_usage as a list/string) must not break
+    # parsing of the other windows.
+    payload = {
+        "five_hour": {"utilization": 30.0, "resets_at": "2026-04-17T12:00:00+00:00"},
+        "extra_usage": [],
+    }
+    limits = _parse_limits(payload)
+    assert len(limits) == 1
+    assert limits[0].window_key == "five_hour"
+
+
+def test_parse_limits_enterprise_skips_nan_utilization():
+    payload = {"extra_usage": {
+        "is_enabled": True,
+        "utilization": float("nan"),
+        "monthly_limit": 100000,
+        "used_credits": 1987,
+        "currency": "USD",
+    }}
+    assert _parse_limits(payload) == []
+
+
+def test_parse_limits_enterprise_skips_zero_limit():
+    payload = {"extra_usage": {
+        "is_enabled": True,
+        "utilization": 0.0,
+        "monthly_limit": 0,
+        "used_credits": 0,
+        "currency": "USD",
+    }}
+    assert _parse_limits(payload) == []
+
+
+def test_parse_limits_enterprise_rounds_fractional_used_credits():
+    payload = {"extra_usage": {
+        "is_enabled": True,
+        "utilization": 2.0,
+        "monthly_limit": 100000,
+        "used_credits": 1987.6,
+        "currency": "USD",
+    }}
+    limits = _parse_limits(payload)
+    assert len(limits) == 1
+    assert limits[0].used_credits == 1988
+
+
 def test_parse_limits_max_plan_still_ignores_extra_usage():
     # Regression guard: a Pro/Max payload with sibling windows populated
     # should still emit the session/weekly entries and skip extra_usage when
@@ -156,3 +203,11 @@ def test_format_credits_cents():
 
 def test_format_credits_none():
     assert format_credits(None) == ""
+
+
+def test_format_credits_non_usd_appends_iso_code():
+    assert format_credits(123456, "EUR") == "1,234.56 EUR"
+
+
+def test_format_credits_non_usd_round():
+    assert format_credits(100000, "GBP") == "1,000 GBP"

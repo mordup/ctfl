@@ -359,10 +359,12 @@ class TrayIcon(QSystemTrayIcon):
         return line
 
     def _tooltip_limits_lines(self, data, format_reset):
+        from .providers import format_credits
         from .providers.prediction import predict_exhaustion
 
-        # Separate session (five_hour) from weekly (seven_day*) limits
+        # Separate session (five_hour), weekly (seven_day*), and monthly spend
         session_lines = []
+        spend_lines = []
         weekly_parts = []
         weekly_reset = ""
         weekly_pred = None
@@ -378,6 +380,15 @@ class TrayIcon(QSystemTrayIcon):
                 if short:
                     parts.append(f"resets {short}")
                 session_lines.append(" | ".join(parts))
+            elif info.window_key == "monthly_spend":
+                used = format_credits(info.used_credits, info.currency)
+                cap = format_credits(info.monthly_limit, info.currency)
+                parts = [f"{info.name}: {used} / {cap} ({info.utilization:.0f}%)"]
+                reset = format_reset(info.resets_at)
+                short = reset.removeprefix("Resets in ").removeprefix("Resets ")
+                if short:
+                    parts.append(f"resets {short}")
+                spend_lines.append(" | ".join(parts))
             else:
                 # Weekly limits — collect for grouping
                 label = info.name
@@ -400,6 +411,7 @@ class TrayIcon(QSystemTrayIcon):
                 line += f" | resets {weekly_reset}"
             result.append(line)
 
+        result.extend(spend_lines)
         return result
 
     def _check_rate_limits(self, data: UsageData) -> None:

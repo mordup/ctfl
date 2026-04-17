@@ -26,7 +26,14 @@ from .constants import (
     ICON_THEME_NAME,
     TIME_FMT_HM,
 )
-from .providers import RateLimitInfo, UsageData, format_cost, format_reset, format_tokens
+from .providers import (
+    RateLimitInfo,
+    UsageData,
+    format_cost,
+    format_credits,
+    format_reset,
+    format_tokens,
+)
 
 _PROGRESS_BAR_STYLE = (
     "QProgressBar { background: #3a3a3a; border: none; border-radius: 3px; }"
@@ -262,9 +269,14 @@ class PopupWidget(QWidget):
 
         from .providers.prediction import predict_exhaustion
 
-        # Separate session from weekly limits
+        # Partition limits by window type. Enterprise plans return null for
+        # session/weekly and only populate the monthly spend window.
         session_limits = [i for i in limits if i.window_key == "five_hour"]
-        weekly_limits = [i for i in limits if i.window_key != "five_hour"]
+        spend_limits = [i for i in limits if i.window_key == "monthly_spend"]
+        weekly_limits = [
+            i for i in limits
+            if i.window_key not in ("five_hour", "monthly_spend")
+        ]
 
         for info in session_limits:
             pred = predict_exhaustion(info, info.window_key)
@@ -322,6 +334,24 @@ class PopupWidget(QWidget):
                     label = "Global" if len(weekly_limits) > 1 else None
                 self._add_limit_bar(info, label, predict_exhaustion)
 
+        if spend_limits and (session_limits or weekly_limits):
+            from PyQt6.QtWidgets import QSizePolicy, QSpacerItem
+            self._limits_layout.addItem(
+                QSpacerItem(0, 6, QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed)
+            )
+
+        for info in spend_limits:
+            reset_text = format_reset(info.resets_at)
+            header_row = QHBoxLayout()
+            header_row.addWidget(QLabel(f"<b>{info.name}</b>"))
+            header_row.addStretch()
+            if reset_text:
+                reset_label = QLabel(reset_text)
+                reset_label.setStyleSheet(f"color: {COLOR_MUTED};")
+                header_row.addWidget(reset_label)
+            self._limits_layout.addLayout(header_row)
+            self._add_limit_bar(info, None, None)
+
         # Separator line
         sep = QFrame()
         sep.setFrameShape(QFrame.Shape.HLine)
@@ -343,9 +373,18 @@ class PopupWidget(QWidget):
         bar.setTextVisible(False)
         bar.setFixedHeight(10)
         bar.setStyleSheet(_PROGRESS_BAR_STYLE)
-        pct_label = QLabel(f"{info.utilization:.0f}% used")
         bar_row.addWidget(bar, 1)
-        bar_row.addWidget(pct_label)
+        if info.used_credits is not None and info.monthly_limit is not None:
+            spend_text = (
+                f"{format_credits(info.used_credits, info.currency)} / "
+                f"{format_credits(info.monthly_limit, info.currency)}"
+            )
+            bar_row.addWidget(QLabel(spend_text))
+            pct_label = QLabel(f"({info.utilization:.0f}%)")
+            pct_label.setStyleSheet(f"color: {COLOR_MUTED};")
+            bar_row.addWidget(pct_label)
+        else:
+            bar_row.addWidget(QLabel(f"{info.utilization:.0f}% used"))
         self._limits_layout.addLayout(bar_row)
 
         if predict_exhaustion is not None:

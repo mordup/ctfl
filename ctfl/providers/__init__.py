@@ -9,6 +9,19 @@ def format_cost(usd: float) -> str:
     return f"${usd:.2f}"
 
 
+def format_credits(cents: int | None, currency: str | None = "USD") -> str:
+    """Format minor-unit credit amounts (e.g. USD cents) as a display string.
+    Drops fractional cents on round-dollar values (e.g. $1,000 not $1,000.00).
+    """
+    if cents is None:
+        return ""
+    amount = cents / 100
+    symbol = "$" if (currency or "USD").upper() == "USD" else ""
+    if amount == int(amount):
+        return f"{symbol}{int(amount):,}"
+    return f"{symbol}{amount:,.2f}"
+
+
 def format_tokens(n: int) -> str:
     if n >= 1_000_000_000:
         return f"{n / 1_000_000_000:.1f}B"
@@ -54,7 +67,12 @@ class RateLimitInfo:
     name: str            # "Session", "Weekly", "Weekly (Sonnet)", etc.
     utilization: float   # 0-100 percentage
     resets_at: str | None  # ISO 8601 timestamp or None
-    window_key: str = ""  # "five_hour", "seven_day", etc.
+    window_key: str = ""  # "five_hour", "seven_day", "monthly_spend", etc.
+    # Spend-limit extras (Enterprise plans only). All three are either set
+    # together or left None. Amounts are in minor units (e.g. USD cents).
+    used_credits: int | None = None
+    monthly_limit: int | None = None
+    currency: str | None = None
 
 
 @dataclass
@@ -106,8 +124,13 @@ def format_reset(resets_at: str | None) -> str:
         minutes = (total_seconds % 3600) // 60
         if hours < 24:
             return f"Resets in {hours}h{minutes:02d}m"
-        from ..constants import DATETIME_FMT_WEEKDAY
         local_time = reset_time.astimezone()
-        return f"Resets {local_time.strftime(DATETIME_FMT_WEEKDAY)}"
+        # Within the next week, weekday+time is unambiguous ("Fri 02:00").
+        # Beyond that, show the date so a month-away reset doesn't look
+        # like one that's a few days out.
+        if hours < 24 * 7:
+            from ..constants import DATETIME_FMT_WEEKDAY
+            return f"Resets {local_time.strftime(DATETIME_FMT_WEEKDAY)}"
+        return f"Resets {local_time.strftime('%-d %b')}"
     except (ValueError, TypeError):
         return ""

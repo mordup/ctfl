@@ -37,5 +37,16 @@ def test_days():
     assert result.startswith("Resets ")
 
 
+def test_far_future_uses_date():
+    # Reset >7 days out should include a date (month + day), not just
+    # weekday + time, so a monthly-spend reset can't be misread as one
+    # that's a few days away.
+    future = (datetime.now(UTC) + timedelta(days=14)).isoformat()
+    result = _format_reset(future)
+    assert result.startswith("Resets ")
+    # Trailing should have a numeric day, not HH:MM
+    assert ":" not in result
+
+
 def test_invalid_format():
     assert _format_reset("not-a-date") == ""

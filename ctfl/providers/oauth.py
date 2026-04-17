@@ -58,7 +58,10 @@ _PLAN_LABELS = {
     "pro": "Pro",
     "max": "Max 5x",
     "max_20x": "Max 20x",
+    "enterprise": "Enterprise",
 }
+
+_MONTHLY_SPEND_KEY = "monthly_spend"
 
 
 def _resolve_credentials_file(config: Config | None) -> Path:
@@ -88,12 +91,16 @@ def _is_expired(expires_at_ms: int) -> bool:
     return now_ms >= expires_at_ms - _TOKEN_EXPIRY_BUFFER * 1000
 
 
+_LIMIT_CACHE_FIELDS = (
+    "name", "utilization", "resets_at", "window_key",
+    "used_credits", "monthly_limit", "currency",
+)
+
+
 def _save_limits_cache(credentials_file: Path, limits: list[RateLimitInfo]) -> None:
     try:
         _CACHE_DIR.mkdir(parents=True, exist_ok=True, mode=0o700)
-        data = [{"name": li.name, "utilization": li.utilization,
-                 "resets_at": li.resets_at, "window_key": li.window_key}
-                for li in limits]
+        data = [{f: getattr(li, f) for f in _LIMIT_CACHE_FIELDS} for li in limits]
         cache_file = _limits_cache_file(credentials_file)
         tmp = cache_file.with_suffix(".tmp")
         fd = os.open(str(tmp), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
@@ -109,9 +116,30 @@ def _save_limits_cache(credentials_file: Path, limits: list[RateLimitInfo]) -> N
 def _load_limits_cache(credentials_file: Path) -> list[RateLimitInfo]:
     try:
         data = json.loads(_limits_cache_file(credentials_file).read_text())
-        return [RateLimitInfo(**entry) for entry in data]
+        # Drop unknown keys so an older or newer cache schema doesn't crash
+        # the dataclass constructor. Missing optional keys get their defaults.
+        return [
+            RateLimitInfo(**{k: v for k, v in entry.items() if k in _LIMIT_CACHE_FIELDS})
+            for entry in data
+        ]
     except (OSError, json.JSONDecodeError, TypeError):
         return []
+
+
+def _first_of_next_month_utc(now=None) -> str:
+    """ISO timestamp for 00:00 UTC on the first day of the next calendar
+    month. Used as the synthetic reset time for Enterprise monthly-spend
+    windows (the API doesn't return one).
+    """
+    from datetime import UTC
+    from datetime import datetime as dt
+
+    current = now or dt.now(UTC)
+    if current.month == 12:
+        year, month = current.year + 1, 1
+    else:
+        year, month = current.year, current.month + 1
+    return dt(year, month, 1, tzinfo=UTC).isoformat()
 
 
 def _parse_limits(data: dict) -> list[RateLimitInfo]:
@@ -130,6 +158,23 @@ def _parse_limits(data: dict) -> list[RateLimitInfo]:
             resets_at=entry.get("resets_at"),
             window_key=key,
         ))
+
+    extra = data.get("extra_usage")
+    if extra and extra.get("is_enabled"):
+        utilization = extra.get("utilization")
+        monthly_limit = extra.get("monthly_limit")
+        used_credits = extra.get("used_credits")
+        if utilization is not None and monthly_limit is not None and used_credits is not None:
+            utilization = max(0.0, min(100.0, float(utilization)))
+            limits.append(RateLimitInfo(
+                name="Monthly spend",
+                utilization=utilization,
+                resets_at=_first_of_next_month_utc(),
+                window_key=_MONTHLY_SPEND_KEY,
+                used_credits=int(used_credits),
+                monthly_limit=int(monthly_limit),
+                currency=extra.get("currency") or "USD",
+            ))
     return limits
 
 

@@ -383,12 +383,13 @@ class TrayIcon(QSystemTrayIcon):
             elif info.window_key == "monthly_spend":
                 used = format_credits(info.used_credits, info.currency)
                 cap = format_credits(info.monthly_limit, info.currency)
-                parts = [f"{info.name}: {used} / {cap} ({info.utilization:.0f}%)"]
+                spend_lines.append(
+                    f"{info.name}: {used} / {cap} ({info.utilization:.0f}%)"
+                )
                 reset = format_reset(info.resets_at)
                 short = reset.removeprefix("Resets in ").removeprefix("Resets ")
                 if short:
-                    parts.append(f"resets {short}")
-                spend_lines.append(" | ".join(parts))
+                    spend_lines.append(f"resets {short}")
             else:
                 # Weekly limits — collect for grouping
                 label = info.name

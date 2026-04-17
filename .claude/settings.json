@@ -1,5 +1,25 @@
 {
+  "permissions": {
+    "deny": [
+      "Bash(rm -rf /)",
+      "Bash(git push --force:*)",
+      "Bash(git reset --hard:*)",
+      "Read(**/.claude/.credentials.json)",
+      "Read(**/.cache/ctfl/*.json)"
+    ]
+  },
   "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Read|Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/block-sensitive-files.sh"
+          }
+        ]
+      }
+    ],
     "PostToolUse": [
       {
         "matcher": "Write|Edit",

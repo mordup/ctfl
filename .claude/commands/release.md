@@ -2,14 +2,17 @@ Release workflow for the ctfl project. Follow these steps exactly:
 
 ## 1. Audit the codebase
 
-Run a full audit before releasing. Launch the code-auditor and quality-analyst agents in parallel to check for:
+Run a full audit before releasing. Launch the code-auditor agent, the quality-analyst agent, and the `docs-freshness` skill in parallel to check for:
 - Security vulnerabilities, resource leaks, correctness bugs
 - UX consistency, edge cases, behavioral issues
 - Unused imports, dead code
+- Drift between the app and the ctfl-docs site (copy + screenshots)
 
 **Only fix findings with confidence CONFIRMED or HIGH.** Skip PROBABLE/POSSIBLE/SPECULATIVE — those need investigation, not a rushed fix before release.
 
-If fixes are needed, apply them and commit using `/commit` before proceeding.
+If code fixes are needed, apply them and commit using `/commit` before proceeding.
+
+For each item in the docs-freshness punch list, ask the user whether to update docs now (blocks the release), defer with an explicit ticket, or ship as-is. Don't silently skip.
 
 ## 2. Check for uncommitted changes
 

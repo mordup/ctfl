@@ -1,8 +1,8 @@
 """Claude Tracker For Linux"""
 
-__version__ = "2.7.0"
+__version__ = "2.7.1"
 __changelog__ = (
-    "Claude Design weekly rate-limit bucket is now shown in the popup "
-    "alongside All models and Sonnet, each with its own reset time. "
-    "The Enterprise spend tooltip also wraps more cleanly."
+    "Fixed popup sizing when opening after a profile switch — the "
+    "window now resizes correctly to the new profile's data instead "
+    "of persisting the previous profile's layout."
 )

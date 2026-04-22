@@ -391,10 +391,16 @@ class TrayIcon(QSystemTrayIcon):
                 if short:
                     spend_lines.append(f"resets {short}")
             else:
-                # Weekly limits — collect for grouping
+                # Weekly limits — collect for grouping. Skip buckets that
+                # are both unused AND lack a reset (e.g. Claude Design before
+                # first use) — they'd add noise without information.
+                if info.utilization == 0 and not info.resets_at:
+                    continue
                 label = info.name
                 if label.startswith("Weekly (") and label.endswith(")"):
                     label = label[8:-1]  # "Sonnet", "Opus"
+                elif label == "Weekly":
+                    label = "All models"
                 weekly_parts.append(f"{label}: {info.utilization:.0f}%")
                 if pred and weekly_pred is None:
                     weekly_pred = pred

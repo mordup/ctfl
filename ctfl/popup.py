@@ -308,31 +308,18 @@ class PopupWidget(QWidget):
             )
 
         if weekly_limits:
-            # Shared reset time for all weekly limits
-            weekly_reset = ""
-            for info in weekly_limits:
-                if info.resets_at:
-                    weekly_reset = format_reset(info.resets_at)
-                    break
+            # Group header; reset timestamps render per-bar below
+            self._limits_layout.addWidget(QLabel("<b>Weekly</b>"))
 
-            # Group header: "Weekly" on left, reset on right
-            header_row = QHBoxLayout()
-            header_label = QLabel("<b>Weekly</b>")
-            header_row.addWidget(header_label)
-            header_row.addStretch()
-            if weekly_reset:
-                reset_label = QLabel(weekly_reset)
-                reset_label.setStyleSheet(f"color: {COLOR_MUTED};")
-                header_row.addWidget(reset_label)
-            self._limits_layout.addLayout(header_row)
-
-            # Label each bar when there are multiple weekly limits
             for info in weekly_limits:
                 if info.name.startswith("Weekly (") and info.name.endswith(")"):
                     label = info.name[8:-1]  # "Weekly (Sonnet)" -> "Sonnet"
                 else:
-                    label = "Global" if len(weekly_limits) > 1 else None
-                self._add_limit_bar(info, label, predict_exhaustion)
+                    label = "All models"
+                reset_text = (
+                    format_reset(info.resets_at) if info.resets_at else "Not used yet"
+                )
+                self._add_limit_bar(info, label, predict_exhaustion, reset_text=reset_text)
 
         if spend_limits and (session_limits or weekly_limits):
             from PyQt6.QtWidgets import QSizePolicy, QSpacerItem
@@ -358,13 +345,14 @@ class PopupWidget(QWidget):
         sep.setFrameShadow(QFrame.Shadow.Sunken)
         self._limits_layout.addWidget(sep)
 
-    def _add_limit_bar(self, info, label, predict_exhaustion) -> None:
+    def _add_limit_bar(self, info, label, predict_exhaustion, reset_text=None) -> None:
         """Add a progress bar row with optional left label and prediction."""
         bar_row = QHBoxLayout()
         bar_row.setSpacing(8)
         if label:
             lbl = QLabel(label)
-            lbl.setFixedWidth(55)
+            # Wide enough for "Claude Design" without eliding
+            lbl.setFixedWidth(95)
             lbl.setStyleSheet(f"font-size: {FONT_SIZE_SMALL};")
             bar_row.addWidget(lbl)
         bar = QProgressBar()
@@ -386,6 +374,11 @@ class PopupWidget(QWidget):
         else:
             bar_row.addWidget(QLabel(f"{info.utilization:.0f}% used"))
         self._limits_layout.addLayout(bar_row)
+
+        if reset_text:
+            reset_label = QLabel(reset_text)
+            reset_label.setStyleSheet(f"color: {COLOR_MUTED}; font-size: {FONT_SIZE_SMALL};")
+            self._limits_layout.addWidget(reset_label)
 
         if predict_exhaustion is not None:
             pred = predict_exhaustion(info, info.window_key)

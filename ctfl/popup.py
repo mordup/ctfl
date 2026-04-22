@@ -107,7 +107,7 @@ class PopupWidget(QWidget):
         self._tabs.addTab(_wrap_in_scroll(self._daily_chart), "Daily")
         self._tabs.addTab(_wrap_in_scroll(self._model_chart), "By Model")
         self._tabs.addTab(_wrap_in_scroll(self._project_chart), "By Project")
-        self._tabs.currentChanged.connect(lambda _: self._fit_to_content())
+        self._tabs.currentChanged.connect(lambda _: self._fit_to_content(allow_shrink=False))
         layout.addWidget(self._tabs)
 
         # Footer
@@ -219,9 +219,9 @@ class PopupWidget(QWidget):
             self._project_chart.set_rows([])
 
         self._update_status()
-        self._fit_to_content()
+        self._fit_to_content(allow_shrink=True)
 
-    def _fit_to_content(self) -> None:
+    def _fit_to_content(self, allow_shrink: bool = False) -> None:
         # Size the popup to fit the active tab's content, up to the scroll
         # area's max height. When content exceeds the max, the scrollbar
         # inside the tab takes over and the popup caps at that height.
@@ -233,24 +233,38 @@ class PopupWidget(QWidget):
             capped = min(content_h, _TAB_CONTENT_MAX_HEIGHT)
             tab_bar_h = self._tabs.tabBar().sizeHint().height()
             self._tabs.setFixedHeight(capped + tab_bar_h + 8)
+        self._limits_frame.updateGeometry()
+        if self.layout() is not None:
+            self.layout().invalidate()
+        self.updateGeometry()
         if self.isVisible():
-            # Don't shrink while visible — avoid yanking the window out from
-            # under the user's cursor on tab switch. Only grow if needed.
-            current = self.size()
-            ideal = self.sizeHint()
-            if ideal.height() > current.height() or ideal.width() > current.width():
-                self.resize(max(current.width(), ideal.width()),
-                            max(current.height(), ideal.height()))
+            if allow_shrink:
+                # New data arrived — resize unconditionally so the window
+                # doesn't stay stuck at a larger stale size.
+                self.resize(self.sizeHint())
+            else:
+                # Tab-switch path: only grow, to avoid yanking the window
+                # out from under the user's cursor.
+                current = self.size()
+                ideal = self.sizeHint()
+                if ideal.height() > current.height() or ideal.width() > current.width():
+                    self.resize(max(current.width(), ideal.width()),
+                                max(current.height(), ideal.height()))
         else:
             self.adjustSize()
         self._tabs.setMaximumHeight(16777215)
 
     def _update_limits(self, limits: list[RateLimitInfo]) -> None:
-        # Clear previous widgets
+        # Clear previous widgets. setParent(None) detaches them from the
+        # layout hierarchy synchronously so sizeHint() reflects the new
+        # layout immediately; deleteLater() still handles memory cleanup
+        # on the next event loop tick.
         while self._limits_layout.count():
             item = self._limits_layout.takeAt(0)
-            if item.widget():
-                item.widget().deleteLater()
+            widget = item.widget()
+            if widget is not None:
+                widget.setParent(None)
+                widget.deleteLater()
             elif item.layout():
                 _clear_layout(item.layout())
 
@@ -396,6 +410,9 @@ class PopupWidget(QWidget):
         self._summary_label.setText("Loading...")
         self._refresh_btn.setEnabled(False)
         self._refresh_btn.setText("Loading...")
+        # Clear the previous profile's limit bars so they don't stay
+        # visible (or size the popup) while the new fetch is in flight.
+        self._update_limits([])
 
     def position_near_tray(self, tray_geometry) -> None:
         screen = self.screen()
@@ -445,8 +462,10 @@ class _BarChartWidget(QWidget):
         # Clear previous rows (keep the trailing stretch)
         while self._layout.count() > 1:
             item = self._layout.takeAt(0)
-            if item.widget():
-                item.widget().deleteLater()
+            widget = item.widget()
+            if widget is not None:
+                widget.setParent(None)
+                widget.deleteLater()
             elif item.layout():
                 _clear_layout(item.layout())
 
@@ -549,8 +568,10 @@ def _format_breakdown(
 def _clear_layout(layout) -> None:
     while layout.count():
         item = layout.takeAt(0)
-        if item.widget():
-            item.widget().deleteLater()
+        widget = item.widget()
+        if widget is not None:
+            widget.setParent(None)
+            widget.deleteLater()
         elif item.layout():
             _clear_layout(item.layout())
 

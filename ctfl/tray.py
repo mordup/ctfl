@@ -233,6 +233,10 @@ class TrayIcon(QSystemTrayIcon):
         if self._config.profile == value:
             return
         self._config.profile = value
+        # Drop the previous profile's payload so the popup doesn't render
+        # stale data (and size itself to it) if the user opens it before
+        # the new profile's refresh completes.
+        self._latest_data = None
         self.refresh()
 
     def _sync_profile_menu(self) -> None:
@@ -264,9 +268,12 @@ class TrayIcon(QSystemTrayIcon):
             if self._popup.isVisible():
                 self._popup.hide()
             else:
-                self._popup.position_near_tray(self.geometry())
+                # Render fresh data first so position_near_tray sizes the
+                # window to the current profile's content, not whatever was
+                # last shown.
                 if self._latest_data:
                     self._popup.update_data(self._latest_data)
+                self._popup.position_near_tray(self.geometry())
                 self._popup.show()
 
     def refresh(self) -> None:

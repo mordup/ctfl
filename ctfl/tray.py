@@ -391,6 +391,9 @@ class TrayIcon(QSystemTrayIcon):
             elif info.window_key == "monthly_spend":
                 used = format_credits(info.used_credits, info.currency)
                 cap = format_credits(info.monthly_limit, info.currency)
+                code = (info.currency or "USD").upper()
+                if code != "USD":
+                    used = used.removesuffix(f" {code}")
                 spend_lines.append(
                     f"{info.name}: {used} / {cap} ({info.utilization:.0f}%)"
                 )

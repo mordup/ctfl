@@ -403,11 +403,12 @@ class PopupWidget(QWidget):
         bar.setStyleSheet(_PROGRESS_BAR_STYLE)
         bar_row.addWidget(bar, 1)
         if info.used_credits is not None and info.monthly_limit is not None:
-            spend_text = (
-                f"{format_credits(info.used_credits, info.currency)} / "
-                f"{format_credits(info.monthly_limit, info.currency)}"
-            )
-            bar_row.addWidget(QLabel(spend_text))
+            used = format_credits(info.used_credits, info.currency)
+            cap = format_credits(info.monthly_limit, info.currency)
+            code = (info.currency or "USD").upper()
+            if code != "USD":
+                used = used.removesuffix(f" {code}")
+            bar_row.addWidget(QLabel(f"{used} / {cap}"))
             pct_label = QLabel(f"({info.utilization:.0f}%)")
             pct_label.setStyleSheet(f"color: {COLOR_MUTED};")
             bar_row.addWidget(pct_label)

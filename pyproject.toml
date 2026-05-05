@@ -26,7 +26,7 @@ classifiers = [
     "Topic :: Utilities",
 ]
 dependencies = [
-    "PyQt6>=6.5",
+    "PyQt6>=6.11.0",
     "keyring",
 ]
 

@@ -28,6 +28,8 @@ def predict_exhaustion(info: RateLimitInfo, window_key: str) -> str | None:
 
     try:
         reset_time = datetime.fromisoformat(info.resets_at)
+        if reset_time.tzinfo is None:
+            reset_time = reset_time.replace(tzinfo=UTC)
         now = datetime.now(UTC)
         hours_until_reset = (reset_time - now).total_seconds() / 3600
     except (ValueError, TypeError):

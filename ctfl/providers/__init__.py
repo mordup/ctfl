@@ -118,6 +118,8 @@ def format_reset(resets_at: str | None) -> str:
         return ""
     try:
         reset_time = datetime.fromisoformat(resets_at)
+        if reset_time.tzinfo is None:
+            reset_time = reset_time.replace(tzinfo=UTC)
         now = datetime.now(UTC)
         delta = reset_time - now
         total_seconds = int(delta.total_seconds())

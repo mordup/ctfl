@@ -375,6 +375,7 @@ class TrayIcon(QSystemTrayIcon):
         weekly_parts = []
         weekly_reset = ""
         weekly_pred = None
+        omelette_lines = []
 
         for info in data.limits:
             pred = predict_exhaustion(info, info.window_key)
@@ -398,16 +399,29 @@ class TrayIcon(QSystemTrayIcon):
                 if short:
                     spend_lines.append(f"resets {short}")
             else:
-                # Weekly limits — collect for grouping. Skip buckets that
-                # are both unused AND lack a reset (e.g. Claude Design before
-                # first use) — they'd add noise without information.
+                # Weekly limits. Skip buckets that are both unused AND
+                # lack a reset (e.g. Claude Design before first use).
                 if info.utilization == 0 and not info.resets_at:
                     continue
                 label = info.name
                 if label.startswith("Weekly (") and label.endswith(")"):
-                    label = label[8:-1]  # "Sonnet", "Opus"
+                    label = label[8:-1]  # "Sonnet", "Opus", "Claude Design"
                 elif label == "Weekly":
                     label = "All models"
+                # Claude Design is a separate quota window with its own
+                # reset — render on its own line, not grouped with the
+                # model-share buckets.
+                if info.window_key == "seven_day_omelette":
+                    parts = [f"{label}: {info.utilization:.0f}%"]
+                    if pred:
+                        parts.append(pred)
+                    elif info.resets_at:
+                        reset = format_reset(info.resets_at)
+                        short = reset.removeprefix("Resets in ").removeprefix("Resets ")
+                        if short:
+                            parts.append(f"resets {short}")
+                    omelette_lines.append(" | ".join(parts))
+                    continue
                 weekly_parts.append(f"{label}: {info.utilization:.0f}%")
                 if pred and weekly_pred is None:
                     weekly_pred = pred
@@ -425,6 +439,7 @@ class TrayIcon(QSystemTrayIcon):
                 line += f" | resets {weekly_reset}"
             result.append(line)
 
+        result.extend(omelette_lines)
         result.extend(spend_lines)
         return result
 

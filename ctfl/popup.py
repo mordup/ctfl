@@ -287,9 +287,10 @@ class PopupWidget(QWidget):
         # session/weekly and only populate the monthly spend window.
         session_limits = [i for i in limits if i.window_key == "five_hour"]
         spend_limits = [i for i in limits if i.window_key == "monthly_spend"]
+        omelette_limits = [i for i in limits if i.window_key == "seven_day_omelette"]
         weekly_limits = [
             i for i in limits
-            if i.window_key not in ("five_hour", "monthly_spend")
+            if i.window_key not in ("five_hour", "monthly_spend", "seven_day_omelette")
         ]
 
         for info in session_limits:
@@ -335,7 +336,32 @@ class PopupWidget(QWidget):
                 )
                 self._add_limit_bar(info, label, predict_exhaustion, reset_text=reset_text)
 
-        if spend_limits and (session_limits or weekly_limits):
+        if omelette_limits and (session_limits or weekly_limits):
+            from PyQt6.QtWidgets import QSizePolicy, QSpacerItem
+            self._limits_layout.addItem(
+                QSpacerItem(0, 6, QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed)
+            )
+
+        # Claude Design has its own quota window, separate from the
+        # model-share weekly buckets — render as its own section.
+        for info in omelette_limits:
+            reset_text = (
+                format_reset(info.resets_at) if info.resets_at else "Not used yet"
+            )
+            label_text = info.name
+            if label_text.startswith("Weekly (") and label_text.endswith(")"):
+                label_text = label_text[8:-1]
+            header_row = QHBoxLayout()
+            header_row.addWidget(QLabel(f"<b>{label_text}</b>"))
+            header_row.addStretch()
+            if reset_text:
+                reset_label = QLabel(reset_text)
+                reset_label.setStyleSheet(f"color: {COLOR_MUTED};")
+                header_row.addWidget(reset_label)
+            self._limits_layout.addLayout(header_row)
+            self._add_limit_bar(info, None, None)
+
+        if spend_limits and (session_limits or weekly_limits or omelette_limits):
             from PyQt6.QtWidgets import QSizePolicy, QSpacerItem
             self._limits_layout.addItem(
                 QSpacerItem(0, 6, QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed)

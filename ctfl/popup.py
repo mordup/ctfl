@@ -228,14 +228,27 @@ class PopupWidget(QWidget):
         active_scroll = self._tabs.currentWidget()
         inner = active_scroll.widget() if isinstance(active_scroll, QScrollArea) else None
         if inner is not None:
-            # sizeHint() of the inner widget reflects rows * row_height + padding.
-            content_h = inner.sizeHint().height()
+            # Read the layout's sizeHint directly rather than the widget's,
+            # since the widget's sizeHint may reflect its current geometry
+            # (stretched by the scroll area) rather than its content.
+            layout = inner.layout()
+            if layout is not None:
+                content_h = layout.sizeHint().height()
+            else:
+                content_h = inner.sizeHint().height()
             capped = min(content_h, _TAB_CONTENT_MAX_HEIGHT)
             tab_bar_h = self._tabs.tabBar().sizeHint().height()
             self._tabs.setFixedHeight(capped + tab_bar_h + 8)
+        # Force layout pass synchronously so sizeHint() below reflects the
+        # newly-added/removed items. invalidate() alone only marks dirty;
+        # activate() actually computes — without it, sizeHint() can return
+        # a pre-update value and the popup opens too short.
+        if self._limits_frame.layout() is not None:
+            self._limits_frame.layout().activate()
         self._limits_frame.updateGeometry()
         if self.layout() is not None:
             self.layout().invalidate()
+            self.layout().activate()
         self.updateGeometry()
         if self.isVisible():
             if allow_shrink:

@@ -589,6 +589,8 @@ class TrayIcon(QSystemTrayIcon):
                 self._open_release_page(release["url"])
 
     def _apply_update(self, release: dict) -> None:
+        if self._update_thread is not None and self._update_thread.isRunning():
+            return
 
         self._update_action.setText("Updating...")
         self._update_action.setEnabled(False)

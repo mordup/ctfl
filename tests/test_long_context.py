@@ -1,10 +1,16 @@
 from __future__ import annotations
 
 import json
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from ctfl.providers.instance import Instance
 from ctfl.providers.local import LONG_CONTEXT_THRESHOLD, LocalProvider
+
+# Use a recent timestamp so fixtures stay inside fetch(days=30)'s window
+# regardless of when the suite runs — a fixed date would silently fall out
+# of range 30 days later and zero out every record.
+_RECENT_TS = (datetime.now(UTC) - timedelta(days=1)).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def _write_jsonl(path: Path, records: list[dict]) -> None:
@@ -16,7 +22,7 @@ def _write_jsonl(path: Path, records: list[dict]) -> None:
 
 def _assistant(
     *,
-    timestamp: str = "2026-04-15T10:00:00Z",
+    timestamp: str = _RECENT_TS,
     input_tokens: int = 1000,
     output_tokens: int = 500,
     cache_read: int = 0,

@@ -19,7 +19,7 @@ from enum import Enum, auto
 from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlparse
-from urllib.request import Request, urlopen
+from urllib.request import HTTPRedirectHandler, Request, build_opener, urlopen
 
 from . import __version__
 
@@ -88,9 +88,13 @@ def check_for_update() -> dict | None:
 
     assets = []
     for asset in data.get("assets", []):
+        name = asset.get("name")
+        url = asset.get("browser_download_url")
+        if not name or not url:
+            continue
         assets.append({
-            "name": asset["name"],
-            "url": asset["browser_download_url"],
+            "name": name,
+            "url": url,
             "size": asset.get("size", 0),
         })
 
@@ -176,13 +180,17 @@ def _update_appimage(release: dict) -> str | None:
 
     target = Path(appimage_path)
     tmp = target.with_suffix(".tmp")
-    fd = os.open(str(tmp), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o755)
     try:
-        os.write(fd, new_data)
-        os.fsync(fd)
-    finally:
-        os.close(fd)
-    tmp.rename(target)
+        fd = os.open(str(tmp), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o755)
+        try:
+            os.write(fd, new_data)
+            os.fsync(fd)
+        finally:
+            os.close(fd)
+        tmp.rename(target)
+    except OSError as e:
+        tmp.unlink(missing_ok=True)
+        return f"Failed to write update: {e}"
     return None
 
 
@@ -195,12 +203,24 @@ def _check_download_url(url: str) -> None:
         raise UpdateVerificationError(f"untrusted download host: {parsed.hostname}")
 
 
+class _ValidatingRedirectHandler(HTTPRedirectHandler):
+    """Re-validate every redirect target against the download host
+    allowlist, so a redirect can't escape to an arbitrary host."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        _check_download_url(newurl)
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
+_open_validated = build_opener(_ValidatingRedirectHandler()).open
+
+
 def _download(url: str, max_bytes: int = _MAX_ASSET_BYTES) -> bytes:
     _check_download_url(url)
     req = Request(url, headers={"User-Agent": "ctfl-updater"})
     chunks: list[bytes] = []
     total = 0
-    with urlopen(req, timeout=120) as resp:
+    with _open_validated(req, timeout=120) as resp:
         while chunk := resp.read(1024 * 1024):
             total += len(chunk)
             if total > max_bytes:

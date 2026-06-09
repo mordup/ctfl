@@ -366,7 +366,7 @@ def test_download_size_cap():
     resp.read.side_effect = [b"x" * (1024 * 1024)] * 3  # never empty within cap
     resp.__enter__ = lambda s: s
     resp.__exit__ = MagicMock(return_value=False)
-    with patch("ctfl.updater.urlopen", return_value=resp):
+    with patch("ctfl.updater._open_validated", return_value=resp):
         with pytest.raises(UpdateVerificationError, match="exceeds"):
             _download("https://github.com/x.whl", max_bytes=2 * 1024 * 1024)
 

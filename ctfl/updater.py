@@ -7,6 +7,8 @@ only get a notification with a link.
 
 from __future__ import annotations
 
+import hashlib
+import hmac
 import json
 import os
 import shutil
@@ -16,12 +18,29 @@ import tempfile
 from enum import Enum, auto
 from pathlib import Path
 from urllib.error import HTTPError, URLError
+from urllib.parse import urlparse
 from urllib.request import Request, urlopen
 
 from . import __version__
 
 _RELEASES_URL = "https://api.github.com/repos/mordup/ctfl/releases/latest"
 _GITHUB_RELEASE_PAGE = "https://github.com/mordup/ctfl/releases/latest"
+
+# Release assets must be served from GitHub over HTTPS. browser_download_url
+# is always a github.com URL; the others cover GitHub's redirect targets.
+_ALLOWED_DOWNLOAD_HOSTS = {
+    "github.com",
+    "api.github.com",
+    "objects.githubusercontent.com",
+    "release-assets.githubusercontent.com",
+}
+_CHECKSUMS_ASSET = "SHA256SUMS"
+_MAX_ASSET_BYTES = 200 * 1024 * 1024  # largest artifact (AppImage) is ~100 MB
+_MAX_CHECKSUMS_BYTES = 64 * 1024
+
+
+class UpdateVerificationError(Exception):
+    """Downloaded release asset failed integrity verification."""
 
 
 class InstallMethod(Enum):
@@ -118,7 +137,9 @@ def _update_pip(release: dict) -> str | None:
     if not asset:
         return "No .whl file found in release"
     try:
-        whl_data = _download(asset["url"])
+        whl_data = _download_verified(asset, release["assets"])
+    except UpdateVerificationError as e:
+        return f"Update verification failed: {e}"
     except Exception as e:
         return f"Download failed: {e}"
 
@@ -147,7 +168,9 @@ def _update_appimage(release: dict) -> str | None:
     if not appimage_path:
         return "APPIMAGE env var not set"
     try:
-        new_data = _download(asset["url"])
+        new_data = _download_verified(asset, release["assets"])
+    except UpdateVerificationError as e:
+        return f"Update verification failed: {e}"
     except Exception as e:
         return f"Download failed: {e}"
 
@@ -163,7 +186,62 @@ def _update_appimage(release: dict) -> str | None:
     return None
 
 
-def _download(url: str) -> bytes:
+def _check_download_url(url: str) -> None:
+    """Reject asset URLs that don't point at GitHub over HTTPS."""
+    parsed = urlparse(url)
+    if parsed.scheme != "https":
+        raise UpdateVerificationError(f"insecure download URL (not https): {url}")
+    if parsed.hostname not in _ALLOWED_DOWNLOAD_HOSTS:
+        raise UpdateVerificationError(f"untrusted download host: {parsed.hostname}")
+
+
+def _download(url: str, max_bytes: int = _MAX_ASSET_BYTES) -> bytes:
+    _check_download_url(url)
     req = Request(url, headers={"User-Agent": "ctfl-updater"})
+    chunks: list[bytes] = []
+    total = 0
     with urlopen(req, timeout=120) as resp:
-        return resp.read()
+        while chunk := resp.read(1024 * 1024):
+            total += len(chunk)
+            if total > max_bytes:
+                raise UpdateVerificationError(
+                    f"download exceeds {max_bytes // (1024 * 1024)} MB limit"
+                )
+            chunks.append(chunk)
+    return b"".join(chunks)
+
+
+def _parse_checksums(text: str) -> dict[str, str]:
+    """Parse sha256sum output lines ("<64-hex>  <filename>") into a mapping."""
+    sums: dict[str, str] = {}
+    for line in text.splitlines():
+        parts = line.split()
+        if len(parts) == 2 and len(parts[0]) == 64:
+            sums[parts[1].lstrip("*")] = parts[0].lower()
+    return sums
+
+
+def _download_verified(asset: dict, assets: list[dict]) -> bytes:
+    """Download an asset and verify its SHA-256 against the release's
+    SHA256SUMS asset. Raises UpdateVerificationError when verification
+    cannot be performed or fails — updates fail closed.
+    """
+    sums_asset = next((a for a in assets if a["name"] == _CHECKSUMS_ASSET), None)
+    if sums_asset is None:
+        raise UpdateVerificationError(
+            "release has no SHA256SUMS asset; refusing unverified install"
+        )
+    sums = _parse_checksums(
+        _download(sums_asset["url"], max_bytes=_MAX_CHECKSUMS_BYTES).decode(
+            "utf-8", "replace"
+        )
+    )
+    expected = sums.get(asset["name"])
+    if expected is None:
+        raise UpdateVerificationError(f"no checksum listed for {asset['name']}")
+
+    data = _download(asset["url"])
+    digest = hashlib.sha256(data).hexdigest()
+    if not hmac.compare_digest(digest, expected):
+        raise UpdateVerificationError(f"checksum mismatch for {asset['name']}")
+    return data

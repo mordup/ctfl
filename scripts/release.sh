@@ -52,5 +52,12 @@ else
     echo
 fi
 
+# Checksums — the in-app updater verifies downloads against this file,
+# so it must be uploaded as a release asset alongside the artifacts.
+echo "=== SHA256SUMS ==="
+(cd dist && rm -f SHA256SUMS && sha256sum -- * > SHA256SUMS)
+cat dist/SHA256SUMS
+echo
+
 echo "=== Release artifacts ==="
 ls -lh dist/ 2>/dev/null || true

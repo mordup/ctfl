@@ -80,6 +80,8 @@ Verify that all expected artifacts exist in `dist/`:
 - `ctfl-X.Y.Z-1.x86_64.rpm`
 - `ctfl-X.Y.Z-1-any.pkg.tar.zst`
 - `CTFL-x86_64.AppImage`
+- `SHA256SUMS` — **required**: the in-app updater (≥2.7.3) refuses to install
+  releases without it. Verify it lists the wheel and AppImage names exactly.
 
 ## 9. Create GitHub release
 
@@ -93,7 +95,8 @@ gh release create vX.Y.Z \
   dist/ctfl_X.Y.Z_amd64.deb \
   dist/ctfl-X.Y.Z-1.x86_64.rpm \
   dist/ctfl-X.Y.Z-1-any.pkg.tar.zst \
-  dist/CTFL-x86_64.AppImage
+  dist/CTFL-x86_64.AppImage \
+  dist/SHA256SUMS
 ```
 
 ## 10. Update AUR package

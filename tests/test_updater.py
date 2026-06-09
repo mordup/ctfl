@@ -197,7 +197,7 @@ def test_apply_update_pip_no_whl():
 def test_apply_update_pip_download_fails():
     release = {"assets": [{"name": "ctfl-1.0.0.whl", "url": "http://x", "size": 0}]}
     with patch("ctfl.updater.detect_install_method", return_value=InstallMethod.PIP):
-        with patch("ctfl.updater._download", side_effect=Exception("network error")):
+        with patch("ctfl.updater._download_verified", side_effect=Exception("network error")):
             result = apply_update(release)
     assert "Download failed" in result
 
@@ -205,7 +205,7 @@ def test_apply_update_pip_download_fails():
 def test_apply_update_pip_success(tmp_path):
     release = {"assets": [{"name": "ctfl-1.0.0.whl", "url": "http://x", "size": 0}]}
     with patch("ctfl.updater.detect_install_method", return_value=InstallMethod.PIP):
-        with patch("ctfl.updater._download", return_value=b"fake-whl-data"):
+        with patch("ctfl.updater._download_verified", return_value=b"fake-whl-data"):
             with patch("ctfl.updater.subprocess.run") as mock_run:
                 mock_run.return_value = MagicMock(returncode=0)
                 result = apply_update(release)
@@ -216,7 +216,7 @@ def test_apply_update_pip_success(tmp_path):
 def test_apply_update_pip_install_fails():
     release = {"assets": [{"name": "ctfl-1.0.0.whl", "url": "http://x", "size": 0}]}
     with patch("ctfl.updater.detect_install_method", return_value=InstallMethod.PIP):
-        with patch("ctfl.updater._download", return_value=b"fake-whl-data"):
+        with patch("ctfl.updater._download_verified", return_value=b"fake-whl-data"):
             with patch("ctfl.updater.subprocess.run") as mock_run:
                 mock_run.return_value = MagicMock(returncode=1, stderr="error msg")
                 result = apply_update(release)
@@ -243,7 +243,7 @@ def test_apply_update_appimage_success(tmp_path, monkeypatch):
     monkeypatch.setenv("APPIMAGE", str(appimage_path))
     release = {"assets": [{"name": "CTFL-x86_64.AppImage", "url": "http://x", "size": 0}]}
     with patch("ctfl.updater.detect_install_method", return_value=InstallMethod.APPIMAGE):
-        with patch("ctfl.updater._download", return_value=b"new-appimage-data"):
+        with patch("ctfl.updater._download_verified", return_value=b"new-appimage-data"):
             result = apply_update(release)
     assert result is None
     assert appimage_path.read_bytes() == b"new-appimage-data"
@@ -258,8 +258,127 @@ def test_apply_update_appimage_download_fails(tmp_path, monkeypatch):
     monkeypatch.setenv("APPIMAGE", str(appimage_path))
     release = {"assets": [{"name": "CTFL-x86_64.AppImage", "url": "http://x", "size": 0}]}
     with patch("ctfl.updater.detect_install_method", return_value=InstallMethod.APPIMAGE):
-        with patch("ctfl.updater._download", side_effect=Exception("timeout")):
+        with patch("ctfl.updater._download_verified", side_effect=Exception("timeout")):
             result = apply_update(release)
     assert "Download failed" in result
     # Original file untouched
     assert appimage_path.read_bytes() == b"old-data"
+
+
+# --- download verification ---
+
+WHL_DATA = b"fake-whl-data"
+WHL_SHA = "f29bc64a9d3732b4b9035125fdb3285f5b6455778edca72414671e0ca3b2e0de"
+
+
+def _release_assets(sums_text: str | None):
+    assets = [{
+        "name": "ctfl-99.0.0-py3-none-any.whl",
+        "url": "https://github.com/mordup/ctfl/releases/download/v99.0.0/ctfl-99.0.0-py3-none-any.whl",
+        "size": len(WHL_DATA),
+    }]
+    if sums_text is not None:
+        assets.append({
+            "name": "SHA256SUMS",
+            "url": "https://github.com/mordup/ctfl/releases/download/v99.0.0/SHA256SUMS",
+            "size": len(sums_text),
+        })
+    return assets
+
+
+def _fake_download(sums_text: str):
+    def fake(url, max_bytes=0):
+        if url.endswith("SHA256SUMS"):
+            return sums_text.encode()
+        return WHL_DATA
+    return fake
+
+
+def test_download_verified_ok():
+    import hashlib
+
+    from ctfl.updater import _download_verified
+    sha = hashlib.sha256(WHL_DATA).hexdigest()
+    sums = f"{sha}  ctfl-99.0.0-py3-none-any.whl\n"
+    assets = _release_assets(sums)
+    with patch("ctfl.updater._download", side_effect=_fake_download(sums)):
+        assert _download_verified(assets[0], assets) == WHL_DATA
+
+
+def test_download_verified_no_sums_asset():
+    from ctfl.updater import UpdateVerificationError, _download_verified
+    assets = _release_assets(None)
+    with pytest.raises(UpdateVerificationError, match="no SHA256SUMS"):
+        _download_verified(assets[0], assets)
+
+
+def test_download_verified_asset_not_listed():
+    from ctfl.updater import UpdateVerificationError, _download_verified
+    sums = "0" * 64 + "  some-other-file.whl\n"
+    assets = _release_assets(sums)
+    with patch("ctfl.updater._download", side_effect=_fake_download(sums)):
+        with pytest.raises(UpdateVerificationError, match="no checksum listed"):
+            _download_verified(assets[0], assets)
+
+
+def test_download_verified_checksum_mismatch():
+    from ctfl.updater import UpdateVerificationError, _download_verified
+    sums = "0" * 64 + "  ctfl-99.0.0-py3-none-any.whl\n"
+    assets = _release_assets(sums)
+    with patch("ctfl.updater._download", side_effect=_fake_download(sums)):
+        with pytest.raises(UpdateVerificationError, match="checksum mismatch"):
+            _download_verified(assets[0], assets)
+
+
+def test_apply_update_fails_closed_without_sums():
+    """End to end: a release without SHA256SUMS must not install."""
+    release = {"assets": _release_assets(None)}
+    with patch("ctfl.updater.detect_install_method", return_value=InstallMethod.PIP):
+        with patch("ctfl.updater.subprocess.run") as mock_run:
+            result = apply_update(release)
+    assert "verification failed" in result
+    mock_run.assert_not_called()
+
+
+# --- URL validation and size cap ---
+
+def test_check_download_url_rejects_http():
+    from ctfl.updater import UpdateVerificationError, _check_download_url
+    with pytest.raises(UpdateVerificationError, match="not https"):
+        _check_download_url("http://github.com/mordup/ctfl/releases/x.whl")
+
+
+def test_check_download_url_rejects_unknown_host():
+    from ctfl.updater import UpdateVerificationError, _check_download_url
+    with pytest.raises(UpdateVerificationError, match="untrusted"):
+        _check_download_url("https://evil.example.com/x.whl")
+
+
+def test_check_download_url_allows_github():
+    from ctfl.updater import _check_download_url
+    _check_download_url("https://github.com/mordup/ctfl/releases/download/v1/x.whl")
+    _check_download_url("https://objects.githubusercontent.com/foo")
+
+
+def test_download_size_cap():
+    from ctfl.updater import UpdateVerificationError, _download
+    resp = MagicMock()
+    resp.read.side_effect = [b"x" * (1024 * 1024)] * 3  # never empty within cap
+    resp.__enter__ = lambda s: s
+    resp.__exit__ = MagicMock(return_value=False)
+    with patch("ctfl.updater.urlopen", return_value=resp):
+        with pytest.raises(UpdateVerificationError, match="exceeds"):
+            _download("https://github.com/x.whl", max_bytes=2 * 1024 * 1024)
+
+
+def test_parse_checksums():
+    from ctfl.updater import _parse_checksums
+    sha = "a" * 64
+    text = (
+        f"{sha}  file-one.whl\n"
+        f"{sha} *file-two.AppImage\n"
+        "malformed line\n"
+        "deadbeef  too-short-hash.deb\n"
+    )
+    sums = _parse_checksums(text)
+    assert sums == {"file-one.whl": sha, "file-two.AppImage": sha}

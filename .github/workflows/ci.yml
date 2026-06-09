@@ -1,0 +1,38 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.11", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      # PyQt6 links against these even when no GUI is created; the test
+      # suite imports ctfl.popup, which imports PyQt6 widgets.
+      - name: Install Qt runtime libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libegl1 libgl1 libxkbcommon0 libdbus-1-3 libfontconfig1 libglib2.0-0
+
+      - name: Install package and test tools
+        run: pip install . ruff pytest
+
+      - name: Lint
+        run: ruff check ctfl/ tests/
+
+      - name: Test
+        run: python -m pytest tests/ -q
+        env:
+          QT_QPA_PLATFORM: offscreen

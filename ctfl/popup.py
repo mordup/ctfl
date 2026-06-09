@@ -131,6 +131,9 @@ class PopupWidget(QWidget):
         self._update_limits(data.limits)
 
         if data.error:
+            # Error strings can embed raw exception text from network/JSON
+            # sources — never let QLabel auto-detect them as rich text.
+            self._summary_label.setTextFormat(Qt.TextFormat.PlainText)
             self._summary_label.setText(f"Error: {data.error}")
             self._daily_chart.set_rows([])
             self._model_chart.set_rows([])
@@ -172,6 +175,7 @@ class PopupWidget(QWidget):
                 parts.append(hint)
 
         html = "".join(f"<p style='margin: 2px 0;'>{p}</p>" for p in parts)
+        self._summary_label.setTextFormat(Qt.TextFormat.RichText)
         self._summary_label.setText(html)
 
         # Daily bar chart
@@ -534,6 +538,9 @@ class _BarChartWidget(QWidget):
             top = QHBoxLayout()
             top.setSpacing(8)
             label = QLabel(label_text)
+            # Labels carry model/project names from external data — plain
+            # text only, so HTML-looking names can't restyle the popup.
+            label.setTextFormat(Qt.TextFormat.PlainText)
             font = label.font()
             font.setFamily("monospace")
             label.setFont(font)
@@ -541,6 +548,7 @@ class _BarChartWidget(QWidget):
             top.addWidget(label)
             top.addStretch()
             detail = QLabel(detail_text)
+            detail.setTextFormat(Qt.TextFormat.PlainText)
             detail.setStyleSheet(f"color: {COLOR_MUTED}; font-size: {FONT_SIZE_SMALL};")
             top.addWidget(detail)
             row_layout.addLayout(top)

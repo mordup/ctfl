@@ -609,6 +609,8 @@ class TrayIcon(QSystemTrayIcon):
     def _on_update_applied(self, error: str) -> None:
         from PyQt6.QtWidgets import QMessageBox
 
+        if self._pending_release is None:
+            return
         if error:
             QMessageBox.warning(None, "Update Failed", error)
             self._update_action.setText(f"Update to v{self._pending_release['version']}")

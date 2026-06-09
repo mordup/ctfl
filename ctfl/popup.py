@@ -451,6 +451,7 @@ class PopupWidget(QWidget):
         )
 
     def show_loading(self) -> None:
+        self._summary_label.setTextFormat(Qt.TextFormat.PlainText)
         self._summary_label.setText("Loading...")
         self._refresh_btn.setEnabled(False)
         self._refresh_btn.setText("Loading...")

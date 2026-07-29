@@ -50,11 +50,23 @@ class InstallMethod(Enum):
     UNKNOWN = auto()
 
 
-def detect_install_method() -> InstallMethod:
+def detect_install_method(pkg_dir: Path | None = None) -> InstallMethod:
+    """Detect how ctfl was installed.
+
+    pkg_dir defaults to this package's directory; it is injectable so the
+    branches can be tested without mocking Path.
+    """
     if os.environ.get("APPIMAGE"):
         return InstallMethod.APPIMAGE
+    if pkg_dir is None:
+        pkg_dir = Path(__file__).resolve().parent
+    # Distro packages (pacman/deb/rpm) install into /usr/lib/pythonX.Y/site-packages,
+    # so the site-packages check alone would classify them as pip-updatable and
+    # offer an upgrade that PEP 668 refuses. Anything under /usr belongs to the
+    # system package manager — test that first.
+    if pkg_dir.is_relative_to(Path("/usr")):
+        return InstallMethod.SYSTEM
     # pip install: the package lives in a site-packages directory
-    pkg_dir = Path(__file__).resolve().parent
     if "site-packages" in pkg_dir.parts:
         return InstallMethod.PIP
     exe = shutil.which("ctfl")

@@ -1,4 +1,5 @@
 import json
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -65,47 +66,57 @@ def test_detect_appimage(monkeypatch):
     assert detect_install_method() == InstallMethod.APPIMAGE
 
 
-def test_detect_pip(monkeypatch):
+def test_detect_pip_user_install(monkeypatch):
     monkeypatch.delenv("APPIMAGE", raising=False)
-    fake_path = "/home/user/.local/lib/python3.12/site-packages/ctfl/updater.py"
-    monkeypatch.setattr("ctfl.updater.Path.__file__", fake_path, raising=False)
-    # Patch Path(__file__).resolve().parent.parts to include site-packages
-    from pathlib import PurePosixPath
-    fake_parts = PurePosixPath(fake_path).parent.parts
-    mock_parent = MagicMock()
-    mock_parent.parts = fake_parts
-    mock_resolved = MagicMock()
-    mock_resolved.parent = mock_parent
-    with patch("ctfl.updater.Path.resolve", return_value=mock_resolved):
-        assert detect_install_method() == InstallMethod.PIP
+    pkg = Path("/home/user/.local/lib/python3.12/site-packages/ctfl")
+    assert detect_install_method(pkg) == InstallMethod.PIP
 
 
-def test_detect_system(monkeypatch):
+def test_detect_pip_venv(monkeypatch):
     monkeypatch.delenv("APPIMAGE", raising=False)
-    mock_parent = MagicMock()
-    mock_parent.parts = ("/", "usr", "lib", "python3", "ctfl")
-    mock_resolved = MagicMock()
-    mock_resolved.parent = mock_parent
-    with patch("ctfl.updater.Path.resolve", return_value=mock_resolved):
-        with patch("ctfl.updater.shutil.which", return_value="/usr/bin/ctfl"):
-            mock_exe_path = MagicMock()
-            mock_exe_path.is_relative_to.return_value = True
-            with patch("ctfl.updater.Path.__init__", return_value=None):
-                with patch("ctfl.updater.Path.resolve", return_value=mock_exe_path):
-                    pass
-    # detect_install_method has multiple Path() calls making it hard to mock cleanly.
-    # System detection is covered via can_auto_update returning False for SYSTEM.
+    pkg = Path("/home/user/proj/.venv/lib/python3.12/site-packages/ctfl")
+    assert detect_install_method(pkg) == InstallMethod.PIP
+
+
+def test_detect_system_pacman(monkeypatch):
+    # The AUR package installs here. It contains "site-packages", so the old
+    # ordering classified it as PIP and offered an upgrade PEP 668 refuses.
+    monkeypatch.delenv("APPIMAGE", raising=False)
+    pkg = Path("/usr/lib/python3.14/site-packages/ctfl")
+    assert detect_install_method(pkg) == InstallMethod.SYSTEM
+
+
+def test_detect_system_debian_dist_packages(monkeypatch):
+    monkeypatch.delenv("APPIMAGE", raising=False)
+    pkg = Path("/usr/lib/python3/dist-packages/ctfl")
+    assert detect_install_method(pkg) == InstallMethod.SYSTEM
+
+
+def test_detect_system_usr_local(monkeypatch):
+    monkeypatch.delenv("APPIMAGE", raising=False)
+    pkg = Path("/usr/local/lib/python3.12/site-packages/ctfl")
+    assert detect_install_method(pkg) == InstallMethod.SYSTEM
+
+
+def test_detect_appimage_wins_over_system_path(monkeypatch):
+    monkeypatch.setenv("APPIMAGE", "/home/user/CTFL-x86_64.AppImage")
+    pkg = Path("/usr/lib/python3.14/site-packages/ctfl")
+    assert detect_install_method(pkg) == InstallMethod.APPIMAGE
 
 
 def test_detect_unknown(monkeypatch):
     monkeypatch.delenv("APPIMAGE", raising=False)
-    mock_parent = MagicMock()
-    mock_parent.parts = ("/", "home", "user", "Projects", "ctfl", "ctfl")
-    mock_resolved = MagicMock()
-    mock_resolved.parent = mock_parent
-    with patch("ctfl.updater.Path.resolve", return_value=mock_resolved):
-        with patch("ctfl.updater.shutil.which", return_value=None):
-            assert detect_install_method() == InstallMethod.UNKNOWN
+    pkg = Path("/home/user/Projects/ctfl/ctfl")
+    with patch("ctfl.updater.shutil.which", return_value=None):
+        assert detect_install_method(pkg) == InstallMethod.UNKNOWN
+
+
+def test_detect_system_via_executable_path(monkeypatch):
+    # Source checkout outside site-packages, but `ctfl` resolves under /usr.
+    monkeypatch.delenv("APPIMAGE", raising=False)
+    pkg = Path("/opt/ctfl/ctfl")
+    with patch("ctfl.updater.shutil.which", return_value="/usr/bin/ctfl"):
+        assert detect_install_method(pkg) == InstallMethod.SYSTEM
 
 
 # --- can_auto_update ---

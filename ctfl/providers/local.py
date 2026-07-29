@@ -202,6 +202,9 @@ class LocalProvider:
         )
         long_context_tokens = 0
         long_context_total = 0
+        # Spans the whole scan, not just one file, so a request logged in more
+        # than one place is still counted once.
+        seen_requests: set[str] = set()
 
         if not projects_dir.exists():
             return daily_map, dict(model_totals), [], {}, 0, 0
@@ -241,6 +244,15 @@ class LocalProvider:
                     continue
                 if cache_cutoff and date_str <= cache_cutoff:
                     continue
+
+                # One API request appears as several assistant records, each
+                # carrying an identical copy of the usage. Count it once, or
+                # every token, message and cost figure is inflated ~2x.
+                request_id = rec.get("request_id", "")
+                if request_id:
+                    if request_id in seen_requests:
+                        continue
+                    seen_requests.add(request_id)
 
                 model = rec["model"]
                 rec_tokens = rec["input_tokens"] + rec["output_tokens"] + rec["cache_read"] + rec["cache_creation"]
@@ -369,6 +381,13 @@ class LocalProvider:
                         # Fast mode is billed at a premium, so it is part of the
                         # pricing key. Absent on records predating the field.
                         "speed": usage.get("speed") or "standard",
+                        # Claude Code writes one record per assistant content
+                        # block (text / thinking / tool_use), each repeating the
+                        # same usage object. This identifies the API request so
+                        # the aggregation loop counts it once.
+                        "request_id": (
+                            obj.get("requestId") or msg.get("id") or obj.get("uuid") or ""
+                        ),
                         "session_id": obj.get("sessionId", ""),
                     })
         except OSError:

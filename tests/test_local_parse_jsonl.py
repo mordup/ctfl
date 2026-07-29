@@ -79,6 +79,40 @@ def test_parse_jsonl_missing_file(tmp_path):
     assert records == []
 
 
+def test_parse_jsonl_splits_cache_creation_by_ttl(tmp_path):
+    rec = _make_assistant_record(cache_creation=1000)
+    rec["message"]["usage"]["cache_creation"] = {
+        "ephemeral_1h_input_tokens": 800,
+        "ephemeral_5m_input_tokens": 200,
+    }
+    jsonl_file = tmp_path / "test.jsonl"
+    _write_jsonl(jsonl_file, [rec])
+    records = LocalProvider()._parse_jsonl(jsonl_file)
+    assert records[0]["cache_creation"] == 1000
+    assert records[0]["cache_creation_1h"] == 800
+    assert records[0]["cache_creation_5m"] == 200
+
+
+def test_parse_jsonl_without_ttl_breakdown_bills_5m(tmp_path):
+    # Records predating the breakdown carry only the aggregate; it must land in
+    # the cheaper 5-minute bucket rather than being dropped.
+    jsonl_file = tmp_path / "test.jsonl"
+    _write_jsonl(jsonl_file, [_make_assistant_record(cache_creation=500)])
+    records = LocalProvider()._parse_jsonl(jsonl_file)
+    assert records[0]["cache_creation_5m"] == 500
+    assert records[0]["cache_creation_1h"] == 0
+
+
+def test_parse_jsonl_partial_ttl_breakdown_keeps_remainder(tmp_path):
+    rec = _make_assistant_record(cache_creation=1000)
+    rec["message"]["usage"]["cache_creation"] = {"ephemeral_1h_input_tokens": 600}
+    jsonl_file = tmp_path / "test.jsonl"
+    _write_jsonl(jsonl_file, [rec])
+    records = LocalProvider()._parse_jsonl(jsonl_file)
+    assert records[0]["cache_creation_1h"] == 600
+    assert records[0]["cache_creation_5m"] == 400  # unattributed remainder
+
+
 def test_parse_jsonl_empty_lines(tmp_path):
     jsonl_file = tmp_path / "test.jsonl"
     with open(jsonl_file, "w") as f:

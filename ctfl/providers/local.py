@@ -189,7 +189,7 @@ class LocalProvider:
     def _scan_jsonl_files(
         self, projects_dir: Path, cache_cutoff: str, cutoff_date: str
     ) -> tuple[dict[str, DailyUsage], dict[str, ModelTokens], list[ProjectUsage],
-               dict[str, dict[str, tuple[int, int, int, int]]], int, int]:
+               dict[str, dict[str, tuple[int, int, int, int, int]]], int, int]:
         daily_map: dict[str, DailyUsage] = {}
         model_totals: dict[str, ModelTokens] = defaultdict(
             lambda: ModelTokens(model="")
@@ -198,7 +198,7 @@ class LocalProvider:
         project_agg: dict[str, dict] = {}  # project_dir -> {tokens, messages}
         # Per-day per-model token breakdown for cost estimation
         daily_model_tokens: dict[str, dict[str, list[int]]] = defaultdict(
-            lambda: defaultdict(lambda: [0, 0, 0, 0])
+            lambda: defaultdict(lambda: [0, 0, 0, 0, 0])
         )
         long_context_tokens = 0
         long_context_total = 0
@@ -271,12 +271,15 @@ class LocalProvider:
                 mt.cache_read_tokens += rec["cache_read"]
                 mt.cache_creation_tokens += rec["cache_creation"]
 
-                # Per-day per-model tokens for cost estimation
+                # Per-day per-model tokens for cost estimation. Cache writes are
+                # split by TTL because the two are billed at different rates
+                # (1.25x input for 5-minute, 2x for 1-hour).
                 dmt = daily_model_tokens[date_str][model]
                 dmt[0] += rec["input_tokens"]
                 dmt[1] += rec["output_tokens"]
                 dmt[2] += rec["cache_read"]
-                dmt[3] += rec["cache_creation"]
+                dmt[3] += rec["cache_creation_5m"]
+                dmt[4] += rec["cache_creation_1h"]
 
                 # Aggregate per-project
                 if project_dir:
@@ -302,7 +305,7 @@ class LocalProvider:
         projects.sort(key=lambda p: p.total_tokens, reverse=True)
 
         # Convert daily_model_tokens lists to tuples
-        dmt_out: dict[str, dict[str, tuple[int, int, int, int]]] = {
+        dmt_out: dict[str, dict[str, tuple[int, int, int, int, int]]] = {
             date: {m: tuple(v) for m, v in models.items()}  # type: ignore[misc]
             for date, models in daily_model_tokens.items()
         }
@@ -344,13 +347,23 @@ class LocalProvider:
                         date_str = datetime.fromisoformat(ts).astimezone().strftime(DATE_FMT_ISO)
                     except (ValueError, TypeError):
                         continue
+                    cache_creation = usage.get("cache_creation_input_tokens", 0)
+                    ttl_split = usage.get("cache_creation") or {}
+                    cc_1h = ttl_split.get("ephemeral_1h_input_tokens", 0)
+                    cc_5m = ttl_split.get("ephemeral_5m_input_tokens", 0)
+                    # Records that predate the TTL breakdown (or omit it) carry
+                    # only the aggregate. Bill the unattributed remainder at the
+                    # 5-minute rate, which is the cheaper of the two.
+                    cc_5m += max(0, cache_creation - cc_5m - cc_1h)
                     records.append({
                         "date": date_str,
                         "model": msg.get("model", "unknown"),
                         "input_tokens": usage.get("input_tokens", 0),
                         "output_tokens": usage.get("output_tokens", 0),
                         "cache_read": usage.get("cache_read_input_tokens", 0),
-                        "cache_creation": usage.get("cache_creation_input_tokens", 0),
+                        "cache_creation": cache_creation,
+                        "cache_creation_5m": cc_5m,
+                        "cache_creation_1h": cc_1h,
                         "session_id": obj.get("sessionId", ""),
                     })
         except OSError:

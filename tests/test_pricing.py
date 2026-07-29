@@ -1,8 +1,8 @@
 from ctfl.providers.pricing import _match_pricing, _normalize, estimate_daily_cost
 
-_OPUS_CURRENT = (5.00, 25.00, 0.50, 6.25)
-_OPUS_LEGACY = (15.00, 75.00, 1.50, 18.75)
-_SONNET = (3.00, 15.00, 0.30, 3.75)
+_OPUS_CURRENT = (5.00, 25.00, 0.50, 6.25, 10.00)
+_OPUS_LEGACY = (15.00, 75.00, 1.50, 18.75, 30.00)
+_SONNET = (3.00, 15.00, 0.30, 3.75, 6.00)
 
 
 # --- _normalize ---
@@ -34,11 +34,11 @@ def test_sonnet_5():
 
 
 def test_fable_5():
-    assert _match_pricing("claude-fable-5") == (10.00, 50.00, 1.00, 12.50)
+    assert _match_pricing("claude-fable-5") == (10.00, 50.00, 1.00, 12.50, 20.00)
 
 
 def test_haiku_4_5():
-    assert _match_pricing("claude-haiku-4-5-20251001") == (1.00, 5.00, 0.10, 1.25)
+    assert _match_pricing("claude-haiku-4-5-20251001") == (1.00, 5.00, 0.10, 1.25, 2.00)
 
 
 def test_opus_4_8_uses_current_tier():
@@ -81,20 +81,20 @@ def test_empty_mapping():
 
 def test_single_model_arithmetic():
     # 1M input + 1M output on Opus 5 = $5.00 + $25.00
-    cost = estimate_daily_cost({"claude-opus-5": (1_000_000, 1_000_000, 0, 0)})
+    cost = estimate_daily_cost({"claude-opus-5": (1_000_000, 1_000_000, 0, 0, 0)})
     assert cost == 30.00
 
 
 def test_cache_tokens_priced():
     # 1M cache reads + 1M cache writes on Opus 5 = $0.50 + $6.25
-    cost = estimate_daily_cost({"claude-opus-5": (0, 0, 1_000_000, 1_000_000)})
+    cost = estimate_daily_cost({"claude-opus-5": (0, 0, 1_000_000, 1_000_000, 0)})
     assert cost == 6.75
 
 
 def test_multiple_known_models_sum():
     cost = estimate_daily_cost({
-        "claude-opus-5": (1_000_000, 0, 0, 0),
-        "claude-sonnet-5": (1_000_000, 0, 0, 0),
+        "claude-opus-5": (1_000_000, 0, 0, 0, 0),
+        "claude-sonnet-5": (1_000_000, 0, 0, 0, 0),
     })
     assert cost == 8.00
 
@@ -103,15 +103,75 @@ def test_unknown_model_suppresses_whole_day():
     # Regression: previously the first matched model set a "matched" flag and a
     # total was returned that silently omitted every unpriced model.
     cost = estimate_daily_cost({
-        "claude-opus-5": (1_000_000, 0, 0, 0),
-        "claude-quasar-9": (5_000_000, 0, 0, 0),
+        "claude-opus-5": (1_000_000, 0, 0, 0, 0),
+        "claude-quasar-9": (5_000_000, 0, 0, 0, 0),
     })
     assert cost is None
 
 
 def test_only_unknown_models():
-    assert estimate_daily_cost({"gpt-5": (1_000_000, 0, 0, 0)}) is None
+    assert estimate_daily_cost({"gpt-5": (1_000_000, 0, 0, 0, 0)}) is None
 
 
 def test_zero_tokens_known_model():
-    assert estimate_daily_cost({"claude-opus-5": (0, 0, 0, 0)}) == 0.0
+    assert estimate_daily_cost({"claude-opus-5": (0, 0, 0, 0, 0)}) == 0.0
+
+
+# --- cache-write TTL tiers ---
+
+def test_1h_cache_write_costs_2x_input():
+    # Opus 5 input is $5/MTok, so a 1-hour write is $10/MTok.
+    cost = estimate_daily_cost({"claude-opus-5": (0, 0, 0, 0, 1_000_000)})
+    assert cost == 10.00
+
+
+def test_5m_cache_write_costs_1_25x_input():
+    cost = estimate_daily_cost({"claude-opus-5": (0, 0, 0, 1_000_000, 0)})
+    assert cost == 6.25
+
+
+def test_cache_write_tiers_are_not_interchangeable():
+    five_m = estimate_daily_cost({"claude-opus-5": (0, 0, 0, 1_000_000, 0)})
+    one_h = estimate_daily_cost({"claude-opus-5": (0, 0, 0, 0, 1_000_000)})
+    assert one_h > five_m
+    assert one_h / five_m == 1.6  # 2.0x vs 1.25x
+
+
+def test_mixed_ttl_writes_sum():
+    # 800k at 1h ($10/MTok) + 200k at 5m ($6.25/MTok)
+    cost = estimate_daily_cost({"claude-opus-5": (0, 0, 0, 200_000, 800_000)})
+    assert cost == 8.00 + 1.25
+
+
+# --- zero-token pseudo-models must not veto the day ---
+
+def test_synthetic_pseudo_model_does_not_suppress_day():
+    # Regression: "<synthetic>" is unpriced but carries no tokens, so it must
+    # not suppress an otherwise fully-priced day.
+    cost = estimate_daily_cost({
+        "claude-opus-5": (1_000_000, 0, 0, 0, 0),
+        "<synthetic>": (0, 0, 0, 0, 0),
+    })
+    assert cost == 5.00
+
+
+def test_unknown_fallback_model_does_not_suppress_day():
+    # _parse_jsonl defaults a missing model name to "unknown".
+    cost = estimate_daily_cost({
+        "claude-opus-5": (1_000_000, 0, 0, 0, 0),
+        "unknown": (0, 0, 0, 0, 0),
+    })
+    assert cost == 5.00
+
+
+def test_unpriced_model_with_tokens_still_suppresses():
+    # The zero-token exemption must not weaken fail-closed for real usage.
+    cost = estimate_daily_cost({
+        "claude-opus-5": (1_000_000, 0, 0, 0, 0),
+        "<synthetic>": (0, 0, 0, 0, 1),
+    })
+    assert cost is None
+
+
+def test_only_zero_token_pseudo_models():
+    assert estimate_daily_cost({"<synthetic>": (0, 0, 0, 0, 0)}) == 0.0

@@ -128,6 +128,117 @@ def test_parse_limits_max_plan_still_ignores_extra_usage():
     assert limits[0].window_key == "five_hour"
 
 
+# --- newer top-level `spend` block ---
+
+# Shape observed on a Max account with usage credits enabled: extra_usage is
+# still present but its utilization is null, and the live figures live in the
+# sibling `spend` block instead.
+_SPEND_BLOCK_PAYLOAD = {
+    "five_hour": {"utilization": 15.0, "resets_at": "2026-07-29T11:30:00+00:00"},
+    "seven_day": {"utilization": 4.0, "resets_at": "2026-07-31T19:00:00+00:00"},
+    "seven_day_opus": None,
+    "seven_day_sonnet": None,
+    "extra_usage": {
+        "is_enabled": True, "currency": "EUR", "monthly_limit": 6000,
+        "used_credits": 0.0, "utilization": None,
+    },
+    "spend": {
+        "enabled": True, "percent": 25, "severity": "normal",
+        "used": {"amount_minor": 1500, "currency": "EUR", "exponent": 2},
+        "limit": {"amount_minor": 6000, "currency": "EUR", "exponent": 2},
+        "cap": {"credits": None,
+                "money": {"amount_minor": 6000, "currency": "EUR", "exponent": 2}},
+    },
+}
+
+
+def test_spend_block_emits_monthly_spend_row():
+    limits = _parse_limits(_SPEND_BLOCK_PAYLOAD)
+    assert [li.window_key for li in limits] == ["five_hour", "seven_day", "monthly_spend"]
+    spend = limits[-1]
+    assert spend.name == "Monthly spend"
+    assert spend.utilization == 25
+    assert spend.used_credits == 1500
+    assert spend.monthly_limit == 6000
+    assert spend.currency == "EUR"
+
+
+def test_spend_block_renders_as_euros():
+    spend = _parse_limits(_SPEND_BLOCK_PAYLOAD)[-1]
+    assert format_credits(spend.used_credits, spend.currency) == "15 EUR"
+    assert format_credits(spend.monthly_limit, spend.currency) == "60 EUR"
+
+
+def test_spend_block_wins_over_legacy_extra_usage():
+    # extra_usage says 0 used; the spend block says 1500. The newer block wins.
+    assert _parse_limits(_SPEND_BLOCK_PAYLOAD)[-1].used_credits == 1500
+
+
+def test_spend_block_disabled_falls_back_to_extra_usage():
+    payload = dict(_SPEND_BLOCK_PAYLOAD)
+    payload["spend"] = {**payload["spend"], "enabled": False}
+    payload["extra_usage"] = {**payload["extra_usage"], "utilization": 3.0}
+    spend = _parse_limits(payload)[-1]
+    assert spend.used_credits == 0
+    assert spend.utilization == 3.0
+
+
+def test_spend_block_malformed_falls_back_to_extra_usage():
+    payload = dict(_SPEND_BLOCK_PAYLOAD)
+    payload["spend"] = {"enabled": True}  # no money blocks
+    payload["extra_usage"] = {**payload["extra_usage"], "utilization": 3.0}
+    assert _parse_limits(payload)[-1].utilization == 3.0
+
+
+def test_spend_block_uses_cap_when_limit_absent():
+    payload = {"spend": {
+        "enabled": True, "percent": 10,
+        "used": {"amount_minor": 600, "currency": "EUR", "exponent": 2},
+        "cap": {"money": {"amount_minor": 6000, "currency": "EUR", "exponent": 2}},
+    }}
+    spend = _parse_limits(payload)[0]
+    assert spend.monthly_limit == 6000
+
+
+def test_spend_block_derives_percent_when_absent():
+    payload = {"spend": {
+        "enabled": True,
+        "used": {"amount_minor": 1500, "currency": "EUR", "exponent": 2},
+        "limit": {"amount_minor": 6000, "currency": "EUR", "exponent": 2},
+    }}
+    assert _parse_limits(payload)[0].utilization == 25.0
+
+
+def test_spend_block_rescales_zero_decimal_currency():
+    # JPY reports exponent 0; format_credits assumes hundredths.
+    payload = {"spend": {
+        "enabled": True, "percent": 50,
+        "used": {"amount_minor": 3000, "currency": "JPY", "exponent": 0},
+        "limit": {"amount_minor": 6000, "currency": "JPY", "exponent": 0},
+    }}
+    spend = _parse_limits(payload)[0]
+    assert format_credits(spend.monthly_limit, "JPY") == "6,000 JPY"
+    assert format_credits(spend.used_credits, "JPY") == "3,000 JPY"
+
+
+def test_spend_block_tolerates_non_dict():
+    payload = {"five_hour": {"utilization": 30.0, "resets_at": None}, "spend": []}
+    assert [li.window_key for li in _parse_limits(payload)] == ["five_hour"]
+
+
+def test_legacy_null_utilization_is_derived():
+    # Regression: the API began sending extra_usage.utilization = null while
+    # still reporting a live limit, which silently dropped the spend row.
+    payload = {"extra_usage": {
+        "is_enabled": True, "currency": "EUR", "monthly_limit": 6000,
+        "used_credits": 1500, "utilization": None,
+    }}
+    limits = _parse_limits(payload)
+    assert len(limits) == 1
+    assert limits[0].utilization == 25.0
+    assert limits[0].used_credits == 1500
+
+
 def test_first_of_next_month_rolls_year_on_december():
     dec = datetime(2026, 12, 15, tzinfo=UTC)
     iso = _first_of_next_month_utc(dec)

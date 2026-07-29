@@ -143,6 +143,93 @@ def _first_of_next_month_utc(now=None) -> str:
     return dt(year, month, 1, tzinfo=UTC).isoformat()
 
 
+def _money(block: object) -> tuple[int, str] | None:
+    """Extract (hundredths, currency code) from a money block.
+
+    The API reports an integer plus the exponent it is scaled by;
+    format_credits assumes hundredths, so rescale anything else (zero-decimal
+    currencies such as JPY report exponent 0).
+    """
+    if not isinstance(block, dict):
+        return None
+    try:
+        amount = int(block["amount_minor"])
+        exponent = int(block.get("exponent", 2))
+    except (KeyError, TypeError, ValueError):
+        return None
+    if exponent != 2:
+        amount = round(amount * 10 ** (2 - exponent))
+    return amount, (block.get("currency") or "USD").upper()
+
+
+def _spend_row(
+    utilization: float, used: int, limit: int, currency: str
+) -> RateLimitInfo | None:
+    if utilization != utilization:  # NaN
+        return None
+    return RateLimitInfo(
+        name="Monthly spend",
+        utilization=max(0.0, min(100.0, utilization)),
+        resets_at=_first_of_next_month_utc(),
+        window_key=_MONTHLY_SPEND_KEY,
+        used_credits=used,
+        monthly_limit=limit,
+        currency=(currency or "USD").upper(),
+    )
+
+
+def _spend_from_spend_block(spend: object) -> RateLimitInfo | None:
+    """Read the newer top-level `spend` block."""
+    if not isinstance(spend, dict) or not spend.get("enabled"):
+        return None
+    cap = spend.get("cap")
+    used = _money(spend.get("used"))
+    limit = _money(spend.get("limit")) or _money(
+        cap.get("money") if isinstance(cap, dict) else None
+    )
+    if used is None or limit is None or limit[0] <= 0:
+        return None
+    percent = spend.get("percent")
+    utilization = (
+        float(percent) if percent is not None else used[0] / limit[0] * 100
+    )
+    return _spend_row(utilization, used[0], limit[0], limit[1])
+
+
+def _spend_from_extra_usage(extra: object) -> RateLimitInfo | None:
+    """Read the legacy `extra_usage` block."""
+    if not isinstance(extra, dict) or not extra.get("is_enabled"):
+        return None
+    if extra.get("monthly_limit") is None or extra.get("used_credits") is None:
+        return None
+    try:
+        limit = int(extra["monthly_limit"])
+        used = float(extra["used_credits"])
+    except (TypeError, ValueError):
+        return None
+    if limit <= 0:
+        return None
+    utilization = extra.get("utilization")
+    if utilization is None:
+        # The API now sends null here while still reporting a live limit;
+        # derive it rather than dropping the row.
+        utilization = used / limit * 100
+    # round() on fractional cents in case the API drops to float.
+    return _spend_row(float(utilization), round(used), limit,
+                      extra.get("currency") or "USD")
+
+
+def _parse_spend_limit(data: dict) -> RateLimitInfo | None:
+    """Build the monthly-spend row from whichever shape the API sent.
+
+    Prefers the newer `spend` block, which carries the utilization the legacy
+    `extra_usage` block has stopped populating.
+    """
+    return _spend_from_spend_block(data.get("spend")) or _spend_from_extra_usage(
+        data.get("extra_usage")
+    )
+
+
 def _parse_limits(data: dict) -> list[RateLimitInfo]:
     limits: list[RateLimitInfo] = []
     for key, label in _KEY_LABELS.items():
@@ -160,30 +247,9 @@ def _parse_limits(data: dict) -> list[RateLimitInfo]:
             window_key=key,
         ))
 
-    extra = data.get("extra_usage")
-    if isinstance(extra, dict) and extra.get("is_enabled"):
-        utilization = extra.get("utilization")
-        monthly_limit = extra.get("monthly_limit")
-        used_credits = extra.get("used_credits")
-        # Skip NaN utilization (util != util) and zero/missing limit;
-        # round() on fractional cents in case the API drops to float.
-        if (
-            utilization is not None
-            and monthly_limit is not None
-            and used_credits is not None
-            and float(utilization) == float(utilization)
-            and int(monthly_limit) > 0
-        ):
-            utilization = max(0.0, min(100.0, float(utilization)))
-            limits.append(RateLimitInfo(
-                name="Monthly spend",
-                utilization=utilization,
-                resets_at=_first_of_next_month_utc(),
-                window_key=_MONTHLY_SPEND_KEY,
-                used_credits=round(float(used_credits)),
-                monthly_limit=int(monthly_limit),
-                currency=extra.get("currency") or "USD",
-            ))
+    spend = _parse_spend_limit(data)
+    if spend is not None:
+        limits.append(spend)
     return limits
 
 

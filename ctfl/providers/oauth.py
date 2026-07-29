@@ -232,8 +232,13 @@ class OAuthUsageProvider:
                 if result.limits:
                     _save_limits_cache(credentials_file, result.limits)
                 return result
-            except (HTTPError, URLError, OSError):
-                pass  # fall through to OAuth
+            except (HTTPError, URLError, OSError, ValueError, KeyError, IndexError):
+                # Any failure on the session path falls through to the OAuth
+                # token. ValueError covers json.JSONDecodeError (a Cloudflare
+                # challenge returns HTML with HTTP 200) and the empty-org-list
+                # case; KeyError/IndexError cover a malformed organizations
+                # payload. Without these, the fallback below was skipped.
+                pass
 
         # Fall back to OAuth token
         try:

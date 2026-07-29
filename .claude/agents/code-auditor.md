@@ -3,7 +3,10 @@ name: code-auditor
 description: Audits code for security vulnerabilities, resource leaks, and correctness bugs
 model: opus
 color: red
-maxTurns: 20
+# Full-codebase audits are the most tool-hungry job here: a v2.8.0 pre-release
+# run spent 34 turns and was cut off before it reported, silently returning no
+# findings. Keep well clear of that ceiling.
+maxTurns: 50
 memory: project
 permissionMode: dontAsk
 tools:

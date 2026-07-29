@@ -3,7 +3,8 @@ name: python-architect
 description: Designs implementation plans and evaluates architectural decisions for the codebase
 model: opus
 color: red
-maxTurns: 25
+# Reads as widely as code-auditor before proposing a design; same ceiling risk.
+maxTurns: 40
 memory: project
 permissionMode: dontAsk
 tools:

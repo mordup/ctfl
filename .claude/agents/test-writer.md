@@ -3,7 +3,9 @@ name: test-writer
 description: Writes pytest tests for untested or under-tested code paths
 model: sonnet
 color: yellow
-maxTurns: 40
+# Writes several files and iterates on failing runs, so it burns turns fastest
+# of the four. No observed cut-off yet; raised for the same headroom.
+maxTurns: 60
 memory: project
 permissionMode: acceptEdits
 tools:

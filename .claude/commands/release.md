@@ -8,7 +8,11 @@ Run a full audit before releasing. Launch the code-auditor agent, the quality-an
 - Unused imports, dead code
 - Drift between the app and the ctfl-docs site (copy + screenshots)
 
-**Only fix findings with confidence CONFIRMED or HIGH.** Skip PROBABLE/POSSIBLE/SPECULATIVE — those need investigation, not a rushed fix before release.
+**An agent that returns without an explicit findings section has not finished — it was cut off.** Silence is not a clean audit. Resume it (`SendMessage` to its id) and ask for its results before believing them. During the 2.8.0 release the code-auditor came back with only its opening sentence; resuming it surfaced a bug that had been inflating every token and cost figure by 2.2x. A genuinely clean result says so explicitly, e.g. "no findings at CONFIRMED or HIGH".
+
+**Verify a CONFIRMED finding yourself before acting on it.** Agents are sometimes wrong, and the fix is often invasive. Reproduce it against real data first.
+
+**Only fix findings with confidence CONFIRMED or HIGH.** Skip PROBABLE/POSSIBLE/SPECULATIVE — those need investigation, not a rushed fix before release. Exception: a defect you have demonstrated directly is CONFIRMED regardless of how the agent rated it.
 
 If code fixes are needed, apply them and commit using `/commit` before proceeding.
 

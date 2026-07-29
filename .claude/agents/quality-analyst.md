@@ -3,7 +3,9 @@ name: quality-analyst
 description: Reviews code changes for UX consistency, edge cases, and behavioral correctness
 model: sonnet
 color: yellow
-maxTurns: 20
+# The v2.8.0 pre-release run finished on turn 19 of 20 — it reported only
+# because the review happened to be narrow. Leave headroom.
+maxTurns: 40
 memory: project
 permissionMode: dontAsk
 tools:

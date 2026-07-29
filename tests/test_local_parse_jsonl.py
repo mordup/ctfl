@@ -113,6 +113,21 @@ def test_parse_jsonl_partial_ttl_breakdown_keeps_remainder(tmp_path):
     assert records[0]["cache_creation_5m"] == 400  # unattributed remainder
 
 
+def test_parse_jsonl_reads_speed(tmp_path):
+    rec = _make_assistant_record()
+    rec["message"]["usage"]["speed"] = "fast"
+    jsonl_file = tmp_path / "test.jsonl"
+    _write_jsonl(jsonl_file, [rec])
+    assert LocalProvider()._parse_jsonl(jsonl_file)[0]["speed"] == "fast"
+
+
+def test_parse_jsonl_speed_defaults_to_standard(tmp_path):
+    # Records predating the field, or with it null, bill at standard rates.
+    jsonl_file = tmp_path / "test.jsonl"
+    _write_jsonl(jsonl_file, [_make_assistant_record()])
+    assert LocalProvider()._parse_jsonl(jsonl_file)[0]["speed"] == "standard"
+
+
 def test_parse_jsonl_empty_lines(tmp_path):
     jsonl_file = tmp_path / "test.jsonl"
     with open(jsonl_file, "w") as f:

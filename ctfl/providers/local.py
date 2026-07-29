@@ -157,7 +157,7 @@ class LocalProvider:
             from .pricing import estimate_daily_cost
             for date_str, model_map in daily_model_tokens.items():
                 if date_str in daily_map and daily_map[date_str].cost_usd is None:
-                    cost = estimate_daily_cost(model_map)
+                    cost = estimate_daily_cost(model_map, date=date_str)
                     if cost is not None:
                         daily_map[date_str].cost_usd = cost
 
@@ -189,7 +189,7 @@ class LocalProvider:
     def _scan_jsonl_files(
         self, projects_dir: Path, cache_cutoff: str, cutoff_date: str
     ) -> tuple[dict[str, DailyUsage], dict[str, ModelTokens], list[ProjectUsage],
-               dict[str, dict[str, tuple[int, int, int, int, int]]], int, int]:
+               dict[str, dict[tuple[str, str], tuple[int, int, int, int, int]]], int, int]:
         daily_map: dict[str, DailyUsage] = {}
         model_totals: dict[str, ModelTokens] = defaultdict(
             lambda: ModelTokens(model="")
@@ -197,7 +197,7 @@ class LocalProvider:
         session_dates: dict[str, set[str]] = defaultdict(set)
         project_agg: dict[str, dict] = {}  # project_dir -> {tokens, messages}
         # Per-day per-model token breakdown for cost estimation
-        daily_model_tokens: dict[str, dict[str, list[int]]] = defaultdict(
+        daily_model_tokens: dict[str, dict[tuple[str, str], list[int]]] = defaultdict(
             lambda: defaultdict(lambda: [0, 0, 0, 0, 0])
         )
         long_context_tokens = 0
@@ -271,10 +271,12 @@ class LocalProvider:
                 mt.cache_read_tokens += rec["cache_read"]
                 mt.cache_creation_tokens += rec["cache_creation"]
 
-                # Per-day per-model tokens for cost estimation. Cache writes are
-                # split by TTL because the two are billed at different rates
-                # (1.25x input for 5-minute, 2x for 1-hour).
-                dmt = daily_model_tokens[date_str][model]
+                # Per-day per-(model, speed) tokens for cost estimation. Cache
+                # writes are split by TTL because the two are billed at
+                # different rates (1.25x input for 5-minute, 2x for 1-hour),
+                # and speed is in the key because fast mode is billed at a
+                # premium for the same model.
+                dmt = daily_model_tokens[date_str][(model, rec["speed"])]
                 dmt[0] += rec["input_tokens"]
                 dmt[1] += rec["output_tokens"]
                 dmt[2] += rec["cache_read"]
@@ -305,7 +307,7 @@ class LocalProvider:
         projects.sort(key=lambda p: p.total_tokens, reverse=True)
 
         # Convert daily_model_tokens lists to tuples
-        dmt_out: dict[str, dict[str, tuple[int, int, int, int, int]]] = {
+        dmt_out: dict[str, dict[tuple[str, str], tuple[int, int, int, int, int]]] = {
             date: {m: tuple(v) for m, v in models.items()}  # type: ignore[misc]
             for date, models in daily_model_tokens.items()
         }
@@ -364,6 +366,9 @@ class LocalProvider:
                         "cache_creation": cache_creation,
                         "cache_creation_5m": cc_5m,
                         "cache_creation_1h": cc_1h,
+                        # Fast mode is billed at a premium, so it is part of the
+                        # pricing key. Absent on records predating the field.
+                        "speed": usage.get("speed") or "standard",
                         "session_id": obj.get("sessionId", ""),
                     })
         except OSError:

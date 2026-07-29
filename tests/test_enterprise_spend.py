@@ -246,6 +246,32 @@ def test_spend_block_rescales_zero_decimal_currency():
     assert format_credits(spend.used_credits, "JPY") == "3,000 JPY"
 
 
+def test_spend_block_non_numeric_percent_does_not_kill_other_rows():
+    # Regression: float(percent) on a structured value raised TypeError, which
+    # escaped fetch()'s handler and dropped every rate-limit row.
+    payload = {
+        "five_hour": {"utilization": 30.0, "resets_at": "2026-04-17T12:00:00+00:00"},
+        "spend": {
+            "enabled": True, "percent": {"value": 25},
+            "used": {"amount_minor": 1500, "currency": "EUR", "exponent": 2},
+            "limit": {"amount_minor": 6000, "currency": "EUR", "exponent": 2},
+        },
+    }
+    assert [li.window_key for li in _parse_limits(payload)] == ["five_hour"]
+
+
+def test_spend_block_non_string_currency_does_not_kill_other_rows():
+    payload = {
+        "five_hour": {"utilization": 30.0, "resets_at": "2026-04-17T12:00:00+00:00"},
+        "spend": {
+            "enabled": True, "percent": 25,
+            "used": {"amount_minor": 1500, "currency": 978, "exponent": 2},
+            "limit": {"amount_minor": 6000, "currency": 978, "exponent": 2},
+        },
+    }
+    assert [li.window_key for li in _parse_limits(payload)] == ["five_hour"]
+
+
 def test_spend_block_tolerates_non_dict():
     payload = {"five_hour": {"utilization": 30.0, "resets_at": None}, "spend": []}
     assert [li.window_key for li in _parse_limits(payload)] == ["five_hour"]

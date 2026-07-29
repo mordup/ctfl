@@ -226,10 +226,17 @@ def _parse_spend_limit(data: dict) -> RateLimitInfo | None:
 
     Prefers the newer `spend` block, which carries the utilization the legacy
     `extra_usage` block has stopped populating.
+
+    A malformed block degrades to "no spend row" rather than raising: these
+    values are coerced with float()/upper(), so an unexpected type would
+    otherwise escape fetch()'s handler and drop every rate-limit row.
     """
-    return _spend_from_spend_block(data.get("spend")) or _spend_from_extra_usage(
-        data.get("extra_usage")
-    )
+    try:
+        return _spend_from_spend_block(data.get("spend")) or _spend_from_extra_usage(
+            data.get("extra_usage")
+        )
+    except (TypeError, ValueError, AttributeError):
+        return None
 
 
 def _parse_limits(data: dict) -> list[RateLimitInfo]:
@@ -300,12 +307,15 @@ class OAuthUsageProvider:
                 if result.limits:
                     _save_limits_cache(credentials_file, result.limits)
                 return result
-            except (HTTPError, URLError, OSError, ValueError, KeyError, IndexError):
+            except (HTTPError, URLError, OSError, ValueError, KeyError,
+                    IndexError, TypeError, AttributeError):
                 # Any failure on the session path falls through to the OAuth
                 # token. ValueError covers json.JSONDecodeError (a Cloudflare
                 # challenge returns HTML with HTTP 200) and the empty-org-list
                 # case; KeyError/IndexError cover a malformed organizations
-                # payload. Without these, the fallback below was skipped.
+                # payload; TypeError/AttributeError cover unexpected types in
+                # the usage payload. Without these, the fallback below was
+                # skipped and every rate-limit row silently vanished.
                 pass
 
         # Fall back to OAuth token

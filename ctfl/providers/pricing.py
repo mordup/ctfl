@@ -12,10 +12,12 @@ from __future__ import annotations
 # Claude Code uses both, so the JSONL breakdown decides which applies.
 # cache_read is 0.1x input for every model.
 #
-# Every family is enumerated rather than relying on a short catch-all prefix:
-# a bare "opus-4" key would silently hand a future claude-opus-4-9 the legacy
-# $15/$75 tier. Unrecognised models resolve to None so estimate_daily_cost can
-# fail closed instead of reporting a wrong number.
+# Every id is enumerated and matched exactly after normalisation — not by
+# prefix. Prefix matching would hand a future claude-opus-4-9 the legacy
+# $15/$75 tier via the bare "opus-4" entry, which is the opposite of failing
+# closed. An id that is not listed resolves to None so estimate_daily_cost
+# suppresses the day rather than reporting a wrong number, which also makes a
+# missing entry visible instead of silently mispriced.
 _PRICING: dict[str, tuple[float, float, float, float, float]] = {
     # Fable / Mythos
     "fable-5":    (10.00, 50.00, 1.00, 12.50, 20.00),
@@ -56,9 +58,6 @@ _INTRO_PRICING: dict[str, tuple[str, tuple[float, float, float, float, float]]] 
     "sonnet-5": ("2026-08-31", (2.00, 10.00, 0.20, 2.50, 4.00)),
 }
 
-# Longest key first, so "opus-4-1" is matched before "opus-4". Ties are safe:
-# two distinct keys of equal length cannot prefix one another.
-_PRICING_KEYS = sorted(_PRICING, key=len, reverse=True)
 
 
 def _normalize(model: str) -> str:
@@ -76,12 +75,14 @@ def _normalize(model: str) -> str:
 
 
 def _match_key(model: str) -> str | None:
-    """Return the pricing family key for a model name, or None when unknown."""
+    """Return the pricing key for a model id, or None when it is not listed.
+
+    Matching is exact on the normalised id. A point release we have not priced
+    yet (claude-opus-4-9, claude-sonnet-5-1) therefore returns None and fails
+    closed, rather than inheriting a sibling's rates.
+    """
     name = _normalize(model)
-    for prefix in _PRICING_KEYS:
-        if name.startswith(prefix):
-            return prefix
-    return None
+    return name if name in _PRICING else None
 
 
 def _match_pricing(

@@ -65,6 +65,17 @@ def test_bare_opus_4_gets_legacy():
     assert _match_pricing("claude-opus-4-20250514") == _OPUS_LEGACY
 
 
+def test_unpriced_point_release_fails_closed():
+    # Regression: prefix matching handed claude-opus-4-9 the legacy $15/$75
+    # tier via the bare "opus-4" entry, the opposite of failing closed.
+    assert _match_pricing("claude-opus-4-9") is None
+
+
+def test_unpriced_point_release_does_not_inherit_current_tier():
+    assert _match_pricing("claude-opus-5-1") is None
+    assert _match_pricing("claude-sonnet-5-1") is None
+
+
 def test_unknown_model():
     assert _match_pricing("gpt-5") is None
 

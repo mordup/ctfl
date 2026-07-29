@@ -200,6 +200,31 @@ def test_spend_block_uses_cap_when_limit_absent():
     assert spend.monthly_limit == 6000
 
 
+def test_spend_block_uses_cap_when_limit_is_zeroed():
+    # Regression: _money returns a tuple, so (0, "EUR") is truthy and an `or`
+    # fallback would never consult cap, dropping the row entirely.
+    payload = {"spend": {
+        "enabled": True, "percent": 25,
+        "used": {"amount_minor": 1500, "currency": "EUR", "exponent": 2},
+        "limit": {"amount_minor": 0, "currency": "EUR", "exponent": 2},
+        "cap": {"money": {"amount_minor": 6000, "currency": "EUR", "exponent": 2}},
+    }}
+    limits = _parse_limits(payload)
+    assert len(limits) == 1
+    assert limits[0].monthly_limit == 6000
+    assert limits[0].used_credits == 1500
+
+
+def test_spend_block_zero_limit_and_zero_cap_drops_row():
+    payload = {"spend": {
+        "enabled": True, "percent": 0,
+        "used": {"amount_minor": 0, "currency": "EUR", "exponent": 2},
+        "limit": {"amount_minor": 0, "currency": "EUR", "exponent": 2},
+        "cap": {"money": {"amount_minor": 0, "currency": "EUR", "exponent": 2}},
+    }}
+    assert _parse_limits(payload) == []
+
+
 def test_spend_block_derives_percent_when_absent():
     payload = {"spend": {
         "enabled": True,

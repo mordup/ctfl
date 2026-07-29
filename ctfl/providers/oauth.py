@@ -184,9 +184,11 @@ def _spend_from_spend_block(spend: object) -> RateLimitInfo | None:
         return None
     cap = spend.get("cap")
     used = _money(spend.get("used"))
-    limit = _money(spend.get("limit")) or _money(
-        cap.get("money") if isinstance(cap, dict) else None
-    )
+    limit = _money(spend.get("limit"))
+    if limit is None or limit[0] <= 0:
+        # Fall back to the cap when `limit` is absent *or* zeroed. `or` would
+        # not work here: _money returns a tuple, and (0, "EUR") is truthy.
+        limit = _money(cap.get("money") if isinstance(cap, dict) else None)
     if used is None or limit is None or limit[0] <= 0:
         return None
     percent = spend.get("percent")

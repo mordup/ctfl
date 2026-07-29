@@ -153,7 +153,7 @@ class PopupWidget(QWidget):
                 today_text += f" · {format_cost(today_data.cost_usd)}"
             parts.append(today_text)
         total_text = f"Period total: {format_tokens(total_tokens)} tokens"
-        total_cost = sum(d.cost_usd for d in data.daily if d.cost_usd is not None)
+        total_cost = _period_cost(data.daily)
         if total_cost:
             total_text += f" · {format_cost(total_cost)}"
         parts.append(total_text)
@@ -612,6 +612,19 @@ def _format_breakdown(
         if value:
             items.append((symbol, format_tokens(value), label, color))
     return items or None
+
+
+def _period_cost(daily: list) -> float | None:
+    """Total cost across the period, or None when it would be partial.
+
+    Days sourced from stats-cache have no per-model token breakdown and so no
+    cost, as do days containing an unpriced model. Summing only the priced days
+    yields a figure that reads as a whole-period total while usually covering
+    just today — whose cost the Today line already shows.
+    """
+    if not daily or any(d.cost_usd is None for d in daily):
+        return None
+    return sum(d.cost_usd for d in daily)
 
 
 def _clear_layout(layout) -> None:

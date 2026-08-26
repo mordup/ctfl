@@ -18,6 +18,8 @@ If code fixes are needed, apply them and commit using `/commit` before proceedin
 
 For each item in the docs-freshness punch list, ask the user whether to update docs now (blocks the release), defer with an explicit ticket, or ship as-is. Don't silently skip.
 
+**Also re-check what was deferred last release.** The punch list is generated from current state, so an item deferred with a ticket never reappears on its own — "defer" quietly becomes "drop". Read back the tickets raised at the previous release and ask about each again. As of 2.8.0 two are still open: the "verification failed" troubleshooting note in updating.md, and two passages stating monthly spend is Enterprise-only when it is not.
+
 ## 2. Check for uncommitted changes
 
 Run `git status`. If there are uncommitted changes, run `/commit` first to commit them before proceeding.
@@ -56,21 +58,26 @@ Update the version string in ALL of these files (they must match):
 - `ctfl/__init__.py` — update `__version__` and `__changelog__`
 - `PKGBUILD` — update `pkgver`
 - `appimage/requirements.txt` — update the version in the ctfl requirement line
-- `aur/PKGBUILD` — update `pkgver` (sha256sums updated later in step 10)
+- `aur/PKGBUILD` — update `pkgver` (sha256sums updated later in step 11)
+
+Then verify they actually match, rather than trusting the edits. `release.sh`
+reads the version from `ctfl/__init__.py` alone, so a missed bump elsewhere
+produces mismatched artifacts silently — no step downstream would catch it:
+
+```bash
+VERSION=$(python3 -c "from ctfl import __version__; print(__version__)")
+grep -q "pkgver=${VERSION}" PKGBUILD \
+  && grep -q "pkgver=${VERSION}" aur/PKGBUILD \
+  && grep -q "ctfl-${VERSION}-py3-none-any.whl" appimage/requirements.txt \
+  && echo "versions agree on ${VERSION}" \
+  || { echo "VERSION DRIFT — fix before continuing"; exit 1; }
+```
 
 ## 5. Commit the version bump
 
 Stage the four version files and commit: `release: X.Y.Z`
 
-## 6. Tag
-
-- Create a git tag: `git tag vX.Y.Z`
-
-## 7. Push
-
-- Push the commit and tag: `git push && git push --tags`
-
-## 8. Build artifacts
+## 6. Build artifacts
 
 Run the release build script. fpm needs a PATH export:
 ```bash
@@ -87,7 +94,47 @@ Verify that all expected artifacts exist in `dist/`:
 - `SHA256SUMS` — **required**: the in-app updater (≥2.7.3) refuses to install
   releases without it. Verify it lists the wheel and AppImage names exactly.
 
-## 9. Create GitHub release
+## 7. Smoke-test the built package
+
+Install the built wheel into a throwaway venv and actually run it. Every step
+so far has checked that files exist, not that the program works — and the test
+suite does not catch what only appears at runtime. Both bugs fixed after 2.8.0 — the dropped per-model weekly bucket, and the
+popup collapsing on refresh — passed a green suite and were visible only once
+the app was actually driven.
+
+```bash
+tmp=$(mktemp -d)
+python3 -m venv "$tmp/venv"
+"$tmp/venv/bin/pip" install --quiet dist/ctfl-X.Y.Z-py3-none-any.whl
+"$tmp/venv/bin/python" -m ctfl &
+smoke_pid=$!
+```
+
+Then, in the running app:
+
+- Open the popup from the tray icon and confirm the limit bars render with
+  real numbers — not "Loading...", not an error row.
+- Switch through all three tabs; confirm the window does not collapse or
+  jump.
+- Hover the tray icon and confirm the tooltip shows the same figures.
+
+Kill it when done (`kill $smoke_pid; rm -rf "$tmp"`). A failure here is a
+release blocker: nothing is tagged or pushed yet, so fix, re-commit, and
+restart from step 4.
+
+## 8. Tag
+
+Build first, tag second. A tag pushed before a successful build has to be
+deleted from the remote if `release.sh` fails, and anything that already
+fetched it sees a version that was never released.
+
+- Create a git tag: `git tag vX.Y.Z`
+
+## 9. Push
+
+- Push the commit and tag: `git push && git push --tags`
+
+## 10. Create GitHub release
 
 Use the full release notes (not the in-app changelog) as the body:
 
@@ -103,7 +150,7 @@ gh release create vX.Y.Z \
   dist/SHA256SUMS
 ```
 
-## 10. Update AUR package
+## 11. Update AUR package
 
 Now that the tag is on GitHub, update the AUR package:
 
@@ -133,7 +180,7 @@ Now that the tag is on GitHub, update the AUR package:
    rm -rf "$tmp"
    ```
 
-## 11. Verify and remind
+## 12. Verify and remind
 
 - Run `gh release view vX.Y.Z` to confirm all assets are uploaded
 - Report the release URL to the user

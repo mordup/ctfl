@@ -48,6 +48,11 @@ PATH_RULES = [
     ("*/.credentials.json", "blocked: Claude OAuth credentials"),
     ("*/.cache/ctfl", "blocked: CTFL OAuth/cookie cache"),
     ("*/.cache/ctfl/*", "blocked: CTFL OAuth/cookie cache"),
+    # Both arms above need the literal .cache/ctfl pair, so splitting it
+    # across a cd (cd ~/.cache then reading ctfl/oauth_limits_x.json) matched
+    # neither. Anchor on the filenames the cache actually uses.
+    ("*/ctfl/oauth_limits_*", "blocked: CTFL OAuth/cookie cache"),
+    ("*/ctfl/org_id_*", "blocked: CTFL OAuth/cookie cache"),
     # The whole ~/.ssh tree, not just key filenames — known_hosts and config
     # are not something an agent needs, and enumerating key names is what let
     # the directory form through before.
@@ -76,6 +81,9 @@ NAME_RULES = [
     ("id_rsa*", "blocked: SSH key"),
     ("id_ed25519*", "blocked: SSH key"),
     ("id_ecdsa*", "blocked: SSH key"),
+    # A cd into the cache directory leaves just the bare filename.
+    ("oauth_limits_*.json", "blocked: CTFL OAuth/cookie cache"),
+    ("org_id_*.txt", "blocked: CTFL OAuth/cookie cache"),
 ]
 
 

@@ -149,3 +149,49 @@ def test_scoped_row_of_unknown_window_is_dropped():
         "scope": {"model": {"display_name": "Fable"}},
     }]}
     assert _parse_limits(payload) == []
+
+
+def test_bad_legacy_utilization_skips_only_that_bucket():
+    # The array parser already tolerates a non-numeric percent per entry. The
+    # legacy path coerced with a bare float(), so one malformed key raised out
+    # of _parse_limits and every rate-limit row disappeared.
+    payload = {
+        "five_hour": {"utilization": "12%", "resets_at": None},
+        "seven_day": {"utilization": 25.0, "resets_at": None},
+    }
+    keys = [li.window_key for li in _parse_limits(payload)]
+    assert keys == ["seven_day"]
+
+
+def test_scope_display_name_is_stripped_of_markup():
+    # The name reaches an auto-rich-text QLabel and the tray tooltip, both of
+    # which interpret markup. Before scoped buckets it was always a _KEY_LABELS
+    # constant; now it comes straight from the API.
+    payload = {"limits": [{
+        "kind": "weekly_scoped", "group": "weekly", "percent": 5,
+        "resets_at": None,
+        "scope": {"model": {"display_name": "<b>Fab</b>le"}},
+    }]}
+    (info,) = _parse_limits(payload)
+    assert "<" not in info.name and ">" not in info.name
+
+
+def test_scope_display_name_is_length_capped():
+    payload = {"limits": [{
+        "kind": "weekly_scoped", "group": "weekly", "percent": 5,
+        "resets_at": None,
+        "scope": {"model": {"display_name": "M" * 500}},
+    }]}
+    (info,) = _parse_limits(payload)
+    assert len(info.name) < 80
+
+
+def test_scope_display_name_drops_newlines():
+    # A newline would break the tray tooltip's line structure.
+    payload = {"limits": [{
+        "kind": "weekly_scoped", "group": "weekly", "percent": 5,
+        "resets_at": None,
+        "scope": {"model": {"display_name": "Fable\nSession: 100%"}},
+    }]}
+    (info,) = _parse_limits(payload)
+    assert "\n" not in info.name

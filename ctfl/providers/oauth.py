@@ -291,6 +291,20 @@ def _parse_spend_limit(data: dict) -> RateLimitInfo | None:
         return None
 
 
+# Scope names arrive from the API and are interpolated into a QLabel that
+# defaults to AutoText, into f"<b>{name}</b>" headers, and into the tray
+# tooltip -- all of which interpret markup. Every name used to be a _KEY_LABELS
+# constant, so nothing downstream escapes them.
+_MAX_DISPLAY_NAME = 40
+
+
+def _clean_display_name(name: str) -> str:
+    """Reduce an API-supplied label to something safe to interpolate."""
+    flattened = " ".join(name.split())          # also kills newlines
+    stripped = flattened.replace("<", "").replace(">", "").replace("&", "")
+    return stripped[:_MAX_DISPLAY_NAME].strip()
+
+
 def _scope_display_name(scope: object) -> str | None:
     """Pull a human label out of a `limits[].scope` block.
 
@@ -303,11 +317,11 @@ def _scope_display_name(scope: object) -> str | None:
     for field in ("model", "surface"):
         value = scope.get(field)
         if isinstance(value, str) and value.strip():
-            return value.strip()
+            return _clean_display_name(value)
         if isinstance(value, dict):
             name = value.get("display_name")
             if isinstance(name, str) and name.strip():
-                return name.strip()
+                return _clean_display_name(name)
     return None
 
 
@@ -386,7 +400,14 @@ def _limits_from_keys(data: dict) -> list[RateLimitInfo]:
         utilization = entry.get("utilization")
         if utilization is None:
             continue
-        utilization = max(0.0, min(100.0, float(utilization)))
+        try:
+            utilization = max(0.0, min(100.0, float(utilization)))
+        except (TypeError, ValueError):
+            # One malformed key must not take the whole limits set down with
+            # it. The array parser has always skipped per entry; a bare
+            # float() here raised straight out of _parse_limits, so a single
+            # bad legacy bucket removed every rate-limit row.
+            continue
         limits.append(RateLimitInfo(
             name=label,
             utilization=utilization,

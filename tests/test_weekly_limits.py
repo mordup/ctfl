@@ -76,3 +76,33 @@ def test_predict_exhaustion_supports_claude_design_window():
     # We just assert it doesn't raise and returns a str or None.
     result = predict_exhaustion(info, info.window_key)
     assert result is None or isinstance(result, str)
+
+
+def test_tooltip_attributes_each_prediction_to_its_bucket():
+    """A shared prediction on a multi-bucket line reads as the wrong bucket's.
+
+    The tooltip joined every weekly bucket onto one line but attached only the
+    first non-null prediction to the whole line, so "All models: 20% · Fable:
+    95% | ~8h left" invited reading the estimate as All models'. Per-model
+    buckets make several weekly rows normal, so this now happens routinely.
+    """
+    from datetime import UTC, datetime, timedelta
+
+    from ctfl.providers import UsageData, format_reset
+    from ctfl.tray import TrayIcon
+
+    # Relative to now, so the prediction is actually produced whatever the
+    # clock says: 95% used with a day left burns out before the reset.
+    soon = (datetime.now(UTC) + timedelta(hours=24)).isoformat()
+    later = (datetime.now(UTC) + timedelta(hours=48)).isoformat()
+    data = UsageData(limits=[
+        RateLimitInfo("Weekly", 20.0, later, "seven_day"),
+        RateLimitInfo("Weekly (Fable)", 95.0, soon, "seven_day_fable"),
+    ])
+    (line,) = TrayIcon._tooltip_limits_lines(None, data, format_reset)
+    assert "left" in line, f"fixture produced no prediction at all: {line}"
+
+    # It must sit beside the bucket it belongs to, not dangle at the end of a
+    # line listing several buckets.
+    _, _, tail = line.partition("|")
+    assert "left" not in tail, f"prediction still unattributed: {line}"

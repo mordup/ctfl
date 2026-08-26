@@ -382,7 +382,6 @@ class TrayIcon(QSystemTrayIcon):
         spend_lines = []
         weekly_parts = []
         weekly_reset = ""
-        weekly_pred = None
         omelette_lines = []
 
         for info in data.limits:
@@ -431,9 +430,13 @@ class TrayIcon(QSystemTrayIcon):
                             parts.append(f"resets {short}")
                     omelette_lines.append(" | ".join(parts))
                     continue
-                weekly_parts.append(f"{label}: {info.utilization:.0f}%")
-                if pred and weekly_pred is None:
-                    weekly_pred = pred
+                # Attach the prediction to its own bucket: a single trailing
+                # estimate on a line listing several reads as the first one's,
+                # and per-model buckets make several the normal case.
+                part = f"{label}: {info.utilization:.0f}%"
+                if pred:
+                    part += f" ({pred})"
+                weekly_parts.append(part)
                 if not weekly_reset and info.resets_at:
                     reset = format_reset(info.resets_at)
                     weekly_reset = reset.removeprefix("Resets in ").removeprefix("Resets ")
@@ -442,9 +445,7 @@ class TrayIcon(QSystemTrayIcon):
 
         if weekly_parts:
             line = " · ".join(weekly_parts)
-            if weekly_pred:
-                line += f" | {weekly_pred}"
-            elif weekly_reset:
+            if weekly_reset:
                 line += f" | resets {weekly_reset}"
             result.append(line)
 

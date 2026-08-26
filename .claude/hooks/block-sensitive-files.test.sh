@@ -77,6 +77,9 @@ expect_block 'cd ~ && cat .ssh/id_rsa'          "$(bash_payload 'cd ~ && cat .ss
 expect_block 'cd ~ && cat .gnupg/pubring.kbx'    "$(bash_payload 'cd ~ && cat .gnupg/pubring.kbx')"
 expect_block 'tar czf x.tgz .ssh'              "$(bash_payload 'tar czf x.tgz .ssh')"
 expect_block 'cd ~/.claude && cat .credentials.json'         "$(bash_payload 'cd ~/.claude && cat .credentials.json')"
+expect_block 'cd ~/.cache && cat ctfl/oauth_limits_x.json' "$(bash_payload 'cd ~/.cache && cat ctfl/oauth_limits_x.json')"
+expect_block 'cd ~/.cache/ctfl && cat org_id_x.txt' "$(bash_payload 'cd ~/.cache/ctfl && cat org_id_x.txt')"
+expect_block 'cat oauth_limits_deadbeef.json' "$(bash_payload 'cat oauth_limits_deadbeef.json')"
 
 echo
 echo "=== must stay allowed (false-positive check) ==="

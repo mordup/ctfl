@@ -31,3 +31,7 @@ src/
 CLAUDE.md
 .claude/settings.local.json
 .claude/agent-memory/
+# Workflow scripts are written here by the Workflow tool on every run. Unlike
+# the hand-authored agents/skills/commands above, they are generated copies of
+# bundled skills and go stale as those update.
+.claude/workflows/

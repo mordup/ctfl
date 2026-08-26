@@ -193,9 +193,34 @@ def _spend_row(
     )
 
 
-def _spend_from_spend_block(spend: object) -> RateLimitInfo | None:
+# Reasons the API reports a spend block as inactive that still leave the user
+# with a configured, live limit. claude.ai keeps rendering the bar in these
+# states, and they are precisely the moments the number matters most.
+_EXHAUSTED_REASONS = {"out_of_credits", "spend_limit_reached"}
+
+
+def _credits_configured(extra: object) -> bool:
+    """True when usage credits are set up, whatever their current state.
+
+    Distinguishes "credits ran dry" from "user never turned credits on": both
+    report enabled=False, but only the first should still show a spend row.
+    """
+    if not isinstance(extra, dict):
+        return False
+    if extra.get("user_disabled"):
+        return False
+    return bool(extra.get("credits_ever_enabled"))
+
+
+def _spend_from_spend_block(
+    spend: object, allow_inactive: bool = False
+) -> RateLimitInfo | None:
     """Read the newer top-level `spend` block."""
-    if not isinstance(spend, dict) or not spend.get("enabled"):
+    if not isinstance(spend, dict):
+        return None
+    if not spend.get("enabled") and not (
+        allow_inactive and spend.get("disabled_reason") in _EXHAUSTED_REASONS
+    ):
         return None
     cap = spend.get("cap")
     used = _money(spend.get("used"))
@@ -213,9 +238,15 @@ def _spend_from_spend_block(spend: object) -> RateLimitInfo | None:
     return _spend_row(utilization, used[0], limit[0], limit[1])
 
 
-def _spend_from_extra_usage(extra: object) -> RateLimitInfo | None:
+def _spend_from_extra_usage(
+    extra: object, allow_inactive: bool = False
+) -> RateLimitInfo | None:
     """Read the legacy `extra_usage` block."""
-    if not isinstance(extra, dict) or not extra.get("is_enabled"):
+    if not isinstance(extra, dict):
+        return None
+    if not extra.get("is_enabled") and not (
+        allow_inactive and extra.get("disabled_reason") in _EXHAUSTED_REASONS
+    ):
         return None
     if extra.get("monthly_limit") is None or extra.get("used_credits") is None:
         return None
@@ -242,14 +273,20 @@ def _parse_spend_limit(data: dict) -> RateLimitInfo | None:
     Prefers the newer `spend` block, which carries the utilization the legacy
     `extra_usage` block has stopped populating.
 
+    A block that is inactive only because the credit balance ran dry still
+    yields a row: the plan limit it describes is real, and hiding it drops the
+    bar exactly when the user has hit it.
+
     A malformed block degrades to "no spend row" rather than raising: these
     values are coerced with float()/upper(), so an unexpected type would
     otherwise escape fetch()'s handler and drop every rate-limit row.
     """
     try:
-        return _spend_from_spend_block(data.get("spend")) or _spend_from_extra_usage(
-            data.get("extra_usage")
-        )
+        extra = data.get("extra_usage")
+        allow_inactive = _credits_configured(extra)
+        return _spend_from_spend_block(
+            data.get("spend"), allow_inactive
+        ) or _spend_from_extra_usage(extra, allow_inactive)
     except (TypeError, ValueError, AttributeError):
         return None
 

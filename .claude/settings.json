@@ -11,11 +11,11 @@
   "hooks": {
     "PreToolUse": [
       {
-        "matcher": "Read|Write|Edit|Bash",
+        "matcher": "Read|Write|Edit|Grep|Glob|Bash",
         "hooks": [
           {
             "type": "command",
-            "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/block-sensitive-files.sh"
+            "command": "python3 \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/block-sensitive-files.py"
           }
         ]
       }

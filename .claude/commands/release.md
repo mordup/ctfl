@@ -57,8 +57,11 @@ Format as markdown with sections (e.g., "### Features", "### Fixes", "### Intern
 Update the version string in ALL of these files (they must match):
 - `ctfl/__init__.py` — update `__version__` and `__changelog__`
 - `PKGBUILD` — update `pkgver`
-- `appimage/requirements.txt` — update the version in the ctfl requirement line
 - `aur/PKGBUILD` — update `pkgver` (sha256sums updated later in step 11)
+
+`appimage/requirements.txt` is deliberately not in this list: `release.sh`
+overwrites it with an absolute path to the freshly-built wheel before invoking
+python-appimage, so editing it by hand achieves nothing. It is gitignored.
 
 Then verify they actually match, rather than trusting the edits. `release.sh`
 reads the version from `ctfl/__init__.py` alone, so a missed bump elsewhere
@@ -68,14 +71,13 @@ produces mismatched artifacts silently — no step downstream would catch it:
 VERSION=$(python3 -c "from ctfl import __version__; print(__version__)")
 grep -q "pkgver=${VERSION}" PKGBUILD \
   && grep -q "pkgver=${VERSION}" aur/PKGBUILD \
-  && grep -q "ctfl-${VERSION}-py3-none-any.whl" appimage/requirements.txt \
   && echo "versions agree on ${VERSION}" \
   || { echo "VERSION DRIFT — fix before continuing"; exit 1; }
 ```
 
 ## 5. Commit the version bump
 
-Stage the four version files and commit: `release: X.Y.Z`
+Stage the three version files and commit: `release: X.Y.Z`
 
 ## 6. Build artifacts
 

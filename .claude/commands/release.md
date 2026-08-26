@@ -44,13 +44,18 @@ Ask the user to confirm the in-app changelog text.
 
 ### GitHub release notes
 
-Generate full release notes from commits since last tag. Include everything:
-- User-facing changes (same as in-app)
-- Security hardening details
-- Developer-facing changes (linting, agents, hooks, CI)
-- Test coverage improvements
+Cover everything from the commits since the last tag — user-facing changes,
+security hardening, developer-facing work, test coverage — grouped under
+"### Features", "### Fixes", "### Security", "### Internal".
 
-Format as markdown with sections (e.g., "### Features", "### Fixes", "### Internal").
+**One line per item.** State what changed and, where it is not obvious, why it
+was wrong — in a sentence, not a paragraph. The 2.8.0 notes ran to dense
+multi-sentence bullets with measured ratios and internal field names; nobody
+reads that on a release page, and the detail belongs in the commit messages
+where it already is. If a bullet needs more than about two lines, it is
+carrying explanation that should stay in the commit.
+
+Do not restate the same change in more than one section.
 
 ## 4. Bump version
 

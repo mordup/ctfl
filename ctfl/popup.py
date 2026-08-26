@@ -5,6 +5,7 @@ from datetime import datetime as _dt
 from PyQt6.QtCore import QEvent, Qt, pyqtSignal
 from PyQt6.QtGui import QFont, QFontMetrics, QIcon
 from PyQt6.QtWidgets import (
+    QApplication,
     QFrame,
     QHBoxLayout,
     QLabel,
@@ -226,6 +227,20 @@ class PopupWidget(QWidget):
         self._fit_to_content(allow_shrink=True)
 
     def _fit_to_content(self, allow_shrink: bool = False) -> None:
+        # Rows rebuilt by set_rows()/_update_limits() are still hidden at this
+        # point: Qt shows freshly-added children when their posted show events
+        # are delivered, not when they are added. QLayout::sizeHint() skips
+        # hidden widgets, so measuring now would see only margins and pin the
+        # tab area to ~46px — the popup collapsing on refresh. Deliver those
+        # events first. sendPostedEvents() rather than processEvents(), which
+        # would re-enter the event loop mid-resize; DeferredDelete is excluded
+        # by default, so the deleteLater() cleanup below is untouched.
+        #
+        # activate() alone is not enough here — it computes geometry but does
+        # not deliver show events, which is why the earlier first-open and
+        # profile-switch fixes never covered the refresh path.
+        QApplication.sendPostedEvents()
+
         # Size the popup to fit the active tab's content, up to the scroll
         # area's max height. When content exceeds the max, the scrollbar
         # inside the tab takes over and the popup caps at that height.

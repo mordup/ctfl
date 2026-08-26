@@ -30,7 +30,7 @@ from .providers import (
     RateLimitInfo,
     UsageData,
     format_cost,
-    format_credits,
+    format_credits_range,
     format_reset,
     format_tokens,
 )
@@ -420,12 +420,9 @@ class PopupWidget(QWidget):
         bar.setStyleSheet(_PROGRESS_BAR_STYLE)
         bar_row.addWidget(bar, 1)
         if info.used_credits is not None and info.monthly_limit is not None:
-            used = format_credits(info.used_credits, info.currency)
-            cap = format_credits(info.monthly_limit, info.currency)
-            code = (info.currency or "USD").upper()
-            if code != "USD":
-                used = used.removesuffix(f" {code}")
-            bar_row.addWidget(QLabel(f"{used} / {cap}"))
+            bar_row.addWidget(QLabel(format_credits_range(
+                info.used_credits, info.monthly_limit, info.currency
+            )))
             pct_label = QLabel(f"({info.utilization:.0f}%)")
             pct_label.setStyleSheet(f"color: {COLOR_MUTED};")
             bar_row.addWidget(pct_label)

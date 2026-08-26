@@ -6,7 +6,7 @@ import json
 from datetime import UTC, datetime
 from pathlib import Path
 
-from ctfl.providers import RateLimitInfo, format_credits
+from ctfl.providers import RateLimitInfo, format_credits, format_credits_range
 from ctfl.providers.instance import Instance
 from ctfl.providers.oauth import (
     _first_of_next_month_utc,
@@ -165,8 +165,8 @@ def test_spend_block_emits_monthly_spend_row():
 
 def test_spend_block_renders_as_euros():
     spend = _parse_limits(_SPEND_BLOCK_PAYLOAD)[-1]
-    assert format_credits(spend.used_credits, spend.currency) == "15 EUR"
-    assert format_credits(spend.monthly_limit, spend.currency) == "60 EUR"
+    assert format_credits(spend.used_credits, spend.currency) == "\u20ac15"
+    assert format_credits(spend.monthly_limit, spend.currency) == "\u20ac60"
 
 
 def test_spend_block_wins_over_legacy_extra_usage():
@@ -242,8 +242,8 @@ def test_spend_block_rescales_zero_decimal_currency():
         "limit": {"amount_minor": 6000, "currency": "JPY", "exponent": 0},
     }}
     spend = _parse_limits(payload)[0]
-    assert format_credits(spend.monthly_limit, "JPY") == "6,000 JPY"
-    assert format_credits(spend.used_credits, "JPY") == "3,000 JPY"
+    assert format_credits(spend.monthly_limit, "JPY") == "\u00a56,000"
+    assert format_credits(spend.used_credits, "JPY") == "\u00a53,000"
 
 
 def test_spend_block_non_numeric_percent_does_not_kill_other_rows():
@@ -367,9 +367,31 @@ def test_format_credits_none():
     assert format_credits(None) == ""
 
 
-def test_format_credits_non_usd_appends_iso_code():
-    assert format_credits(123456, "EUR") == "1,234.56 EUR"
+def test_format_credits_known_currency_uses_a_symbol():
+    assert format_credits(123456, "EUR") == "\u20ac1,234.56"
 
 
 def test_format_credits_non_usd_round():
-    assert format_credits(100000, "GBP") == "1,000 GBP"
+    assert format_credits(100000, "GBP") == "\u00a31,000"
+
+
+def test_format_credits_unknown_currency_keeps_iso_code():
+    # CHF has no unambiguous symbol; the code must survive.
+    assert format_credits(123456, "CHF") == "1,234.56 CHF"
+
+
+def test_format_credits_ambiguous_dollar_currency_keeps_iso_code():
+    # CAD must not borrow USD's "$" — the amounts are not interchangeable.
+    assert format_credits(100000, "CAD") == "1,000 CAD"
+
+
+def test_format_credits_range_repeats_a_symbol():
+    assert format_credits_range(572, 6000, "EUR") == "\u20ac5.72 / \u20ac60"
+
+
+def test_format_credits_range_names_an_iso_code_once():
+    assert format_credits_range(1500, 6000, "CHF") == "15 / 60 CHF"
+
+
+def test_format_credits_range_defaults_to_usd():
+    assert format_credits_range(1987, 100000) == "$19.87 / $1,000"

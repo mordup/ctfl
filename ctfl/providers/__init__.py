@@ -9,24 +9,53 @@ def format_cost(usd: float) -> str:
     return f"${usd:.2f}"
 
 
+# Currencies we render with a symbol instead of an ISO code. Deliberately
+# limited to unambiguous ones: CAD, AUD, SGD and friends also spend "$", and a
+# bare "$1,000" would misstate the amount. Anything missing keeps its code.
+_CURRENCY_SYMBOLS = {
+    "USD": "$",
+    "EUR": "\u20ac",
+    "GBP": "\u00a3",
+    "JPY": "\u00a5",
+    "INR": "\u20b9",
+    "KRW": "\u20a9",
+    "BRL": "R$",
+}
+
+
 def format_credits(cents: int | None, currency: str | None = "USD") -> str:
     """Format minor-unit credit amounts (e.g. USD cents) as a display string.
-    Drops fractional cents on round-dollar values (e.g. $1,000 not $1,000.00).
-    Non-USD currencies render as "1,234.56 EUR" since we don't carry symbol
-    tables. Zero-decimal currencies (JPY, etc.) aren't special-cased — the
-    observed Enterprise API returns USD.
+
+    Drops fractional cents on round values (e.g. $1,000 not $1,000.00).
+    Known currencies get a prefixed symbol, matching how the dashboard renders
+    them; the rest fall back to a trailing ISO code ("1,234.56 CHF").
+    Zero-decimal currencies (JPY, etc.) aren't special-cased here — callers
+    rescale to hundredths before this point.
     """
     if cents is None:
         return ""
     amount = cents / 100
     code = (currency or "USD").upper()
-    if code == "USD":
-        if amount == int(amount):
-            return f"${int(amount):,}"
-        return f"${amount:,.2f}"
-    if amount == int(amount):
-        return f"{int(amount):,} {code}"
-    return f"{amount:,.2f} {code}"
+    text = f"{int(amount):,}" if amount == int(amount) else f"{amount:,.2f}"
+    symbol = _CURRENCY_SYMBOLS.get(code)
+    return f"{symbol}{text}" if symbol else f"{text} {code}"
+
+
+def format_credits_range(
+    used: int | None, limit: int | None, currency: str | None = "USD"
+) -> str:
+    """Format a used/limit pair, naming the currency only as often as needed.
+
+    Symbol currencies repeat it ("$5.72 / $60") the way the dashboard does.
+    ISO-code fallbacks carry the code on the limit alone ("15 / 60 CHF"), since
+    "15 CHF / 60 CHF" reads as two separate figures.
+    """
+    used_text = format_credits(used, currency)
+    cap_text = format_credits(limit, currency)
+    code = (currency or "USD").upper()
+    if code not in _CURRENCY_SYMBOLS:
+        used_text = used_text.removesuffix(f" {code}")
+    return f"{used_text} / {cap_text}"
 
 
 def format_tokens(n: int) -> str:

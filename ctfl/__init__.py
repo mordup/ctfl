@@ -1,10 +1,9 @@
 """Claude Tracker For Linux"""
 
-__version__ = "2.8.0"
+__version__ = "2.9.0"
 __changelog__ = (
-    "Token counts were roughly doubled — Claude Code logs one record per "
-    "content block, each repeating the same usage. Your figures will drop by "
-    "about half; the new ones are correct. Cost estimates now also use current "
-    "model pricing and bill cache writes by their actual TTL, and the monthly "
-    "spend bar appears for accounts with usage credits."
+    "Per-model weekly limits such as Fable now appear — the API moved these "
+    "into a new structure and CTFL was silently dropping them. The usage "
+    "popup is now an ordinary window: resizable, it remembers the size you "
+    "give it, and it no longer vanishes when you click another application."
 )

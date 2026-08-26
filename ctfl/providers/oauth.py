@@ -3,6 +3,7 @@ from __future__ import annotations
 import fcntl
 import json
 import os
+import re
 import time
 from collections.abc import Callable
 from pathlib import Path
@@ -52,6 +53,20 @@ _KEY_LABELS = {
     "seven_day_opus": "Weekly (Opus)",
     "seven_day_sonnet": "Weekly (Sonnet)",
     "seven_day_omelette": "Weekly (Claude Design)",
+}
+
+# `limits[].kind` -> window_key, for the unscoped rows. Scoped rows derive
+# their key from the scope itself (see _scoped_window_key).
+_KIND_KEYS = {
+    "session": "five_hour",
+    "weekly_all": "seven_day",
+}
+
+# Scope display names whose legacy window_key the UI still special-cases.
+# Without this, Claude Design would arrive as "seven_day_claude_design" and
+# lose its dedicated section in the popup and tray.
+_SCOPE_KEY_ALIASES = {
+    "claude design": "seven_day_omelette",
 }
 
 
@@ -239,7 +254,83 @@ def _parse_spend_limit(data: dict) -> RateLimitInfo | None:
         return None
 
 
-def _parse_limits(data: dict) -> list[RateLimitInfo]:
+def _scope_display_name(scope: object) -> str | None:
+    """Pull a human label out of a `limits[].scope` block.
+
+    Scopes seen so far carry either a model ({"model": {"display_name": ...}})
+    or a surface; the surface has been null in every payload observed, so
+    accept both a bare string and a display_name dict for it.
+    """
+    if not isinstance(scope, dict):
+        return None
+    for field in ("model", "surface"):
+        value = scope.get(field)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+        if isinstance(value, dict):
+            name = value.get("display_name")
+            if isinstance(name, str) and name.strip():
+                return name.strip()
+    return None
+
+
+def _scoped_window_key(display_name: str) -> str:
+    alias = _SCOPE_KEY_ALIASES.get(display_name.lower())
+    if alias:
+        return alias
+    slug = re.sub(r"[^a-z0-9]+", "_", display_name.lower()).strip("_")
+    return f"seven_day_{slug}" if slug else "seven_day_scoped"
+
+
+def _limits_from_array(entries: object) -> list[RateLimitInfo]:
+    """Parse the structured `limits` array.
+
+    This is where the API now reports per-model weekly buckets (Fable and
+    friends): they arrive as kind="weekly_scoped" rows, *not* as top-level
+    seven_day_* keys, which are all null once the array is present.
+    """
+    if not isinstance(entries, list):
+        return []
+    limits: list[RateLimitInfo] = []
+    seen: set[str] = set()
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        percent = entry.get("percent")
+        if percent is None:
+            continue
+        try:
+            utilization = max(0.0, min(100.0, float(percent)))
+        except (TypeError, ValueError):
+            continue
+
+        kind = entry.get("kind")
+        key = _KIND_KEYS.get(kind)
+        if key is not None:
+            label = _KEY_LABELS.get(key, "Weekly")
+        else:
+            display = _scope_display_name(entry.get("scope"))
+            if display is None:
+                # An unscoped row of an unknown kind has no label to show and
+                # no window to predict against; dropping beats inventing one.
+                continue
+            key = _scoped_window_key(display)
+            label = _KEY_LABELS.get(key) or f"Weekly ({display})"
+
+        if key in seen:
+            continue
+        seen.add(key)
+        limits.append(RateLimitInfo(
+            name=label,
+            utilization=utilization,
+            resets_at=entry.get("resets_at"),
+            window_key=key,
+        ))
+    return limits
+
+
+def _limits_from_keys(data: dict) -> list[RateLimitInfo]:
+    """Parse the legacy top-level five_hour / seven_day_* keys."""
     limits: list[RateLimitInfo] = []
     for key, label in _KEY_LABELS.items():
         entry = data.get(key)
@@ -255,6 +346,14 @@ def _parse_limits(data: dict) -> list[RateLimitInfo]:
             resets_at=entry.get("resets_at"),
             window_key=key,
         ))
+    return limits
+
+
+def _parse_limits(data: dict) -> list[RateLimitInfo]:
+    # The structured array supersedes the top-level keys when present: it is
+    # the only shape that carries scoped buckets, and the keys it duplicates
+    # (five_hour, seven_day) would otherwise render twice.
+    limits = _limits_from_array(data.get("limits")) or _limits_from_keys(data)
 
     spend = _parse_spend_limit(data)
     if spend is not None:

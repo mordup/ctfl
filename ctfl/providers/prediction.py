@@ -16,13 +16,25 @@ _WINDOW_HOURS: dict[str, float] = {
 }
 
 
+def _window_hours(window_key: str) -> float | None:
+    """Hours in a limit window, or None if the key names no known window.
+
+    Per-model weekly buckets are minted from the API's scope labels, so their
+    keys can't be enumerated ahead of time; every seven_day* window is 168h.
+    """
+    known = _WINDOW_HOURS.get(window_key)
+    if known is not None:
+        return known
+    return 168.0 if window_key.startswith("seven_day") else None
+
+
 def predict_exhaustion(info: RateLimitInfo, window_key: str) -> str | None:
     """Predict time until rate limit exhaustion at current pace.
 
     Returns a formatted string like '~1h 30m left' or None if the user
     is on track to stay within the limit (or if prediction isn't possible).
     """
-    window_hours = _WINDOW_HOURS.get(window_key)
+    window_hours = _window_hours(window_key)
     if window_hours is None or info.utilization <= 0 or not info.resets_at:
         return None
 

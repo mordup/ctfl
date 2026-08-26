@@ -4,6 +4,11 @@ on:
   push:
     branches: [main]
   pull_request:
+  # Lets a run be started by hand. Without it, a push whose webhook GitHub
+  # drops (observed on a3dc1f1: the commit was on main, Actions enabled, the
+  # workflow active, yet no check run was ever created) can only be re-run by
+  # pushing another commit.
+  workflow_dispatch:
 
 jobs:
   test:

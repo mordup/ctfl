@@ -5,7 +5,10 @@ Complements the static deny rules in settings.json by covering a wider
 pattern set (SSH keys, GPG, .netrc, .pgpass, OAuth caches).
 
 Covers two tool shapes:
-  Read/Write/Edit/Grep/Glob — tool_input.file_path / .path is matched directly.
+  Read/Write/Edit/Grep/Glob — tool_input.file_path / .path is matched directly,
+                              plus .pattern for Glob, which is where Glob puts
+                              its target. Grep's .pattern is a search regex and
+                              is deliberately not treated as a path.
   Bash                      — the command is parsed with shlex and every token
                               is matched with the same patterns, so
                               `cat ~/.ssh/id_rsa` is stopped like Read would be.
@@ -82,9 +85,19 @@ def reason_for(token: str) -> str | None:
     candidate = expanded.rstrip("/") or expanded
     if not candidate:
         return None
-    for pattern, reason in PATH_RULES:
-        if fnmatch(candidate, pattern):
-            return reason
+    # Every PATH_RULES entry starts with "*/", which fnmatch can only satisfy
+    # by consuming a leading path component. A relative path whose *first*
+    # component is the sensitive directory has none to give, so `cat DIR/key`
+    # from $HOME slipped through while `cat sub/DIR/key` was caught. Test the
+    # relative form as though it had a parent, so a leading component is
+    # treated like any other. Absolute paths already have one.
+    forms = [candidate]
+    if not candidate.startswith("/"):
+        forms.append("*/" + candidate)
+    for form in forms:
+        for pattern, reason in PATH_RULES:
+            if fnmatch(form, pattern):
+                return reason
     if "/" not in candidate:
         for pattern, reason in NAME_RULES:
             if fnmatch(candidate, pattern):
@@ -132,10 +145,21 @@ def main() -> int:
     if not isinstance(tool_input, dict):
         return 0
 
-    path = tool_input.get("file_path") or tool_input.get("path")
-    if path:
-        reason = reason_for(str(path))
-        return deny(reason) if reason else 0
+    # Glob states its target in `pattern` and only optionally roots it with
+    # `path`, so reading file_path/path alone left the tool uncovered despite
+    # being in the matcher. Grep also has a `pattern`, but there it is a search
+    # regex, not a path -- reading it would block `Grep "id_rsa" ctfl/`. So the
+    # key is consulted for Glob only.
+    paths = [tool_input.get("file_path"), tool_input.get("path")]
+    if payload.get("tool_name") == "Glob":
+        paths.append(tool_input.get("pattern"))
+    paths = [p for p in paths if p]
+    if paths:
+        for path in paths:
+            reason = reason_for(str(path))
+            if reason:
+                return deny(reason)
+        return 0
 
     command = tool_input.get("command")
     if command:

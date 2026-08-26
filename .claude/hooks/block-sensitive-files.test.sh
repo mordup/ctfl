@@ -22,6 +22,9 @@ verdict() { # $1 = json payload -> reason, or ALLOWED
 bash_payload() { jq -nc --arg c "$1" '{tool_name:"Bash",tool_input:{command:$c}}'; }
 read_payload() { jq -nc --arg p "$1" '{tool_name:"Read",tool_input:{file_path:$p}}'; }
 grep_payload() { jq -nc --arg p "$1" '{tool_name:"Grep",tool_input:{pattern:".",path:$p}}'; }
+glob_payload() { jq -nc --arg p "$1" '{tool_name:"Glob",tool_input:{pattern:$p}}'; }
+glob_in_payload() { jq -nc --arg p "$1" --arg d "$2" '{tool_name:"Glob",tool_input:{pattern:$p,path:$d}}'; }
+grep_re_payload() { jq -nc --arg r "$1" --arg d "$2" '{tool_name:"Grep",tool_input:{pattern:$r,path:$d}}'; }
 
 fail=0
 expect_block() { r="$(verdict "$2")"
@@ -60,6 +63,22 @@ expect_block 'Read ~/.ssh/id_ecdsa'                  "$(read_payload '~/.ssh/id_
 expect_block 'Grep ~/.ssh/id_rsa'                    "$(grep_payload '~/.ssh/id_rsa')"
 
 echo
+echo "=== Glob: the target lives in .pattern, not .path ==="
+expect_block 'Glob <home>/.ssh/*'              "$(glob_payload "$HOME/.ssh/*")"
+expect_block 'Glob **/.credentials.json'                   "$(glob_payload '**/.credentials.json')"
+expect_block 'Glob ~/.gnupg/*'                   "$(glob_payload '~/.gnupg/*')"
+expect_block 'Glob .ssh/* (relative)'          "$(glob_payload '.ssh/*')"
+expect_block 'Glob *.json in ~/.cache/ctfl'         "$(glob_in_payload '*.json' "$HOME/.cache/ctfl")"
+
+echo
+echo "=== Bash: path whose FIRST component is the sensitive dir ==="
+expect_block 'cat .ssh/id_rsa'                  "$(bash_payload 'cat .ssh/id_rsa')"
+expect_block 'cd ~ && cat .ssh/id_rsa'          "$(bash_payload 'cd ~ && cat .ssh/id_rsa')"
+expect_block 'cd ~ && cat .gnupg/pubring.kbx'    "$(bash_payload 'cd ~ && cat .gnupg/pubring.kbx')"
+expect_block 'tar czf x.tgz .ssh'              "$(bash_payload 'tar czf x.tgz .ssh')"
+expect_block 'cd ~/.claude && cat .credentials.json'         "$(bash_payload 'cd ~/.claude && cat .credentials.json')"
+
+echo
 echo "=== must stay allowed (false-positive check) ==="
 expect_allow 'python -m pytest tests/ -q'       "$(bash_payload 'python -m pytest tests/ -q')"
 expect_allow 'git commit -m "fix credentials"'  "$(bash_payload 'git commit -m "fix credentials handling"')"
@@ -71,6 +90,12 @@ expect_allow 'cat ctfl/providers/oauth.py'      "$(bash_payload 'cat ctfl/provid
 expect_allow 'rm /tmp/ctfl-v2.8.0.tar.gz'       "$(bash_payload 'rm /tmp/ctfl-v2.8.0.tar.gz')"
 expect_allow 'gh release view v2.8.0'           "$(bash_payload 'gh release view v2.8.0')"
 expect_allow 'Read ctfl/popup.py'               "$(read_payload 'ctfl/popup.py')"
+expect_allow 'Grep regex ".ssh" in ctfl/'      "$(grep_re_payload '.ssh' 'ctfl')"
+expect_allow 'Grep regex "id_rsa" in tests/'     "$(grep_re_payload 'id_rsa' 'tests')"
+expect_allow 'Glob **/*.py'                     "$(glob_payload '**/*.py')"
+expect_allow 'Glob .claude/skills/**/*.md'        "$(glob_payload '.claude/skills/**/*.md')"
+expect_allow 'Read .claude/settings.json'         "$(read_payload '.claude/settings.json')"
+expect_allow 'cat .claude/settings.json'          "$(bash_payload 'cat .claude/settings.json')"
 
 echo
 echo "=== fail-closed path ==="

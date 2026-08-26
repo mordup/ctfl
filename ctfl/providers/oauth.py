@@ -346,10 +346,20 @@ def _limits_from_array(entries: object) -> list[RateLimitInfo]:
         if key is not None:
             label = _KEY_LABELS.get(key, "Weekly")
         else:
+            # Only weekly rows may be minted into a seven_day_* key: that
+            # prefix is what groups the row under Weekly in the popup and
+            # tray, and what makes prediction use a 168h window. A scoped
+            # *session* bucket carrying that key would be shown as weekly with
+            # its burn rate computed over the wrong window. `group` is the
+            # payload's own statement of which window a row belongs to, so it
+            # is the authority; kind is accepted too, so a bucket that omits
+            # group still works.
+            if entry.get("group") != "weekly" and entry.get("kind") != "weekly_scoped":
+                continue
             display = _scope_display_name(entry.get("scope"))
             if display is None:
-                # An unscoped row of an unknown kind has no label to show and
-                # no window to predict against; dropping beats inventing one.
+                # A row with no scope has no label to show and no window to
+                # predict against; dropping beats inventing one.
                 continue
             key = _scoped_window_key(display)
             label = _KEY_LABELS.get(key) or f"Weekly ({display})"

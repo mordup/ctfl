@@ -114,3 +114,38 @@ def test_derived_weekly_keys_get_the_weekly_window():
     assert _window_hours("seven_day_fable") == 168.0
     assert _window_hours("five_hour") == 5
     assert _window_hours("monthly_spend") is None
+
+
+def test_scoped_session_bucket_is_not_minted_as_weekly():
+    # A seven_day_* key drives both the UI grouping and prediction's 168h
+    # window, so minting one for a *session*-group bucket would show a 5-hour
+    # limit as weekly and predict its burn rate over the wrong window.
+    payload = {"limits": [{
+        "kind": "session_scoped", "group": "session", "percent": 40,
+        "resets_at": "2026-08-26T15:30:00+00:00",
+        "scope": {"model": {"id": None, "display_name": "Fable"}},
+    }]}
+    assert _parse_limits(payload) == []
+
+
+def test_unknown_weekly_kind_is_still_accepted():
+    # Forward compatibility: the group field is the authority on the window,
+    # so a renamed weekly kind keeps working.
+    payload = {"limits": [{
+        "kind": "weekly_scoped_v2", "group": "weekly", "percent": 12,
+        "resets_at": "2026-08-28T19:00:00+00:00",
+        "scope": {"model": {"display_name": "Fable"}},
+    }]}
+    (info,) = _parse_limits(payload)
+    assert info.window_key == "seven_day_fable"
+    assert info.utilization == 12.0
+
+
+def test_scoped_row_of_unknown_window_is_dropped():
+    # No kind we recognise and no group saying weekly: there is no basis for
+    # choosing a window, and guessing one shows a wrong prediction.
+    payload = {"limits": [{
+        "kind": "mystery", "percent": 5, "resets_at": None,
+        "scope": {"model": {"display_name": "Fable"}},
+    }]}
+    assert _parse_limits(payload) == []

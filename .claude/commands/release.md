@@ -113,6 +113,15 @@ the app was actually driven.
 tmp=$(mktemp -d)
 python3 -m venv "$tmp/venv"
 "$tmp/venv/bin/pip" install --quiet dist/ctfl-X.Y.Z-py3-none-any.whl
+
+# Run from OUTSIDE the repo. From the repo root, sys.path[0] is the working
+# tree and `import ctfl` silently resolves there instead of to the wheel --
+# the smoke test then passes while never touching the artifact. Confirm the
+# path before trusting anything that follows.
+cd "$tmp"
+"$tmp/venv/bin/python" -c "import ctfl; print(ctfl.__file__, ctfl.__version__)"
+# must print a path under $tmp/venv/lib/..., and the version being released
+
 "$tmp/venv/bin/python" -m ctfl &
 smoke_pid=$!
 ```

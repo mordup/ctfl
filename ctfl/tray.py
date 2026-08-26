@@ -265,7 +265,12 @@ class TrayIcon(QSystemTrayIcon):
 
     def _on_activated(self, reason: QSystemTrayIcon.ActivationReason) -> None:
         if reason == QSystemTrayIcon.ActivationReason.Trigger:
-            if self._popup.isVisible():
+            # Hide only when the popup is the window the user is looking at.
+            # It used to be Qt.Tool | WindowStaysOnTopHint and hid itself on
+            # deactivation, so visible implied frontmost; as an ordinary window
+            # it can sit behind the browser, and hiding it there looks like the
+            # tray click did nothing and costs a second click to surface it.
+            if self._popup.isVisible() and self._popup.isActiveWindow():
                 self._popup.hide()
             else:
                 # Render fresh data first so the first-run sizing reflects the
@@ -679,6 +684,9 @@ class TrayIcon(QSystemTrayIcon):
         # Closing rather than dropping the window persists its geometry:
         # neither hideEvent nor closeEvent fires on QApplication.quit().
         self._popup.close()
+        # startDetached races the QSettings destructor otherwise, so the
+        # replacement can read the file before the size is on disk.
+        self._config.sync()
         from PyQt6.QtCore import QProcess
         from PyQt6.QtWidgets import QApplication
         QProcess.startDetached(sys.executable, ["-m", APP_NAME])
@@ -690,5 +698,6 @@ class TrayIcon(QSystemTrayIcon):
         # Same reason as _restart: quitting with the window open would
         # otherwise discard the size the user chose.
         self._popup.close()
+        self._config.sync()
         from PyQt6.QtWidgets import QApplication
         QApplication.quit()

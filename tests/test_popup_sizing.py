@@ -9,7 +9,7 @@ which is what made the popup shrink on refresh while it was already open.
 from __future__ import annotations
 
 import pytest
-from PyQt6.QtCore import QEvent, Qt
+from PyQt6.QtCore import QEvent, QRect, Qt
 from PyQt6.QtWidgets import QApplication, QWidget
 
 from ctfl.config import Config
@@ -154,7 +154,7 @@ def test_losing_focus_does_not_hide_the_window(popup, qapp):
     assert still_visible
 
 
-def test_hiding_saves_geometry(popup, config, qapp):
+def test_hiding_after_a_user_resize_saves_geometry(popup, config, qapp):
     assert config.popup_geometry is None
     popup.resize(700, 600)
     qapp.processEvents()
@@ -217,7 +217,7 @@ def test_tab_area_can_shrink_below_the_first_run_size(popup, qapp):
     assert popup._tabs.minimumHeight() == 0
 
 
-def test_closing_saves_geometry(popup, config, qapp):
+def test_closing_after_a_user_resize_saves_geometry(popup, config, qapp):
     # Quit and Restart close the window rather than dropping it, because
     # QApplication.quit() fires neither hideEvent nor closeEvent.
     assert config.popup_geometry is None
@@ -226,3 +226,162 @@ def test_closing_saves_geometry(popup, config, qapp):
     popup.close()
     qapp.processEvents()
     assert config.popup_geometry
+
+
+# --- only a size the user actually chose is remembered -----------------------
+
+
+def test_never_shown_popup_does_not_save_geometry(qapp, config):
+    # TrayIcon builds the popup at startup and may never show it; tray Quit and
+    # Restart close it. Persisting Qt's default 640x480 there would freeze every
+    # later open at a size the user never picked.
+    assert config.popup_geometry is None
+    w = PopupWidget(config)
+    w.close()
+    qapp.processEvents()
+    assert config.popup_geometry is None
+    w.deleteLater()
+    qapp.processEvents()
+
+
+def test_show_then_hide_without_resizing_does_not_save(popup, config, qapp):
+    # Opening the popup and closing it again is not the user choosing a size.
+    assert config.popup_geometry is None
+    popup.hide()
+    qapp.processEvents()
+    assert config.popup_geometry is None
+
+
+def test_auto_fit_survives_an_open_close_cycle(qapp, config):
+    # Cold start: the popup opens while the fetch is still in flight, so it
+    # renders empty and small. Closing it must not freeze that size. Asserting
+    # merely that it "grew" is not enough -- layout minimums grow it anyway --
+    # so pin it to what a popup that never went through the cycle picks.
+    ref = PopupWidget(config)
+    ref.update_data(_data())
+    ref.show()
+    qapp.processEvents()
+    expected = ref.height()
+    ref.hide()
+    ref.deleteLater()
+    qapp.processEvents()
+    config.popup_geometry = None        # discard anything the reference wrote
+
+    w = PopupWidget(config)
+    w.update_data(UsageData())          # loading state: no limits, no charts
+    w.show()
+    qapp.processEvents()
+    w.hide()                            # closed without ever being resized
+    qapp.processEvents()
+
+    w.show()
+    w.update_data(_data())              # real data arrives
+    qapp.processEvents()
+    assert w.height() == expected, (
+        f"froze at {w.height()}px; a never-cycled popup picks {expected}px"
+    )
+    w.close()
+    w.deleteLater()
+    qapp.processEvents()
+
+
+def test_restored_geometry_is_clamped_to_the_screen(qapp, config):
+    # A geometry saved under one screen layout must not put the window, and its
+    # Refresh/Settings buttons, off-screen when restored under another.
+    w = PopupWidget(config)
+    w.show()
+    qapp.processEvents()
+    avail = w.screen().availableGeometry()
+    w.resize(600, 500)                          # a real user resize
+    w.move(avail.right() + 4000, avail.bottom() + 4000)
+    qapp.processEvents()
+    w.hide()
+    qapp.processEvents()
+    assert config.popup_geometry
+
+    w2 = PopupWidget(config)
+    assert w2.restore_or_position(avail) is True
+    w2.show()
+    qapp.processEvents()
+    assert avail.contains(w2.geometry()), (
+        f"restored off-screen at {w2.geometry()}, screen is {avail}"
+    )
+    w2.close()
+    w2.deleteLater()
+    qapp.processEvents()
+
+
+def test_moving_without_resizing_is_not_remembered(popup, config, qapp):
+    # A deliberate narrowing, not an oversight: window managers move windows
+    # on their own (one was seen repositioning this popup mid-refresh), and a
+    # WM move is indistinguishable from a drag. Counting moves made an
+    # ordinary refresh look like the user had chosen a size. Position still
+    # rides along in saveGeometry() as soon as a resize happens.
+    assert config.popup_geometry is None
+    popup.move(popup.x() + 120, popup.y() + 90)
+    qapp.processEvents()
+    popup.hide()
+    qapp.processEvents()
+    assert config.popup_geometry is None
+
+
+def test_config_sync_flushes_for_a_replacement_process(config):
+    # _restart spawns the new instance immediately; without an explicit flush
+    # the resize the user just made can still be sitting in memory.
+    config.popup_geometry = b"sentinel-geometry-blob"
+    config.sync()
+    assert Config().popup_geometry == b"sentinel-geometry-blob"
+
+
+# --- tray toggle -------------------------------------------------------------
+
+
+class _StubPopup:
+    """Minimal stand-in: constructing a real TrayIcon pulls in keyring."""
+
+    def __init__(self, visible, active):
+        self._visible, self._active = visible, active
+        self.calls = []
+
+    def isVisible(self): return self._visible
+    def isActiveWindow(self): return self._active
+    def hide(self): self.calls.append("hide")
+    def show(self): self.calls.append("show")
+    def raise_(self): self.calls.append("raise")
+    def activateWindow(self): self.calls.append("activate")
+    def update_data(self, data): self.calls.append("update")
+    def restore_or_position(self, geo): self.calls.append("position")
+
+
+class _StubTray:
+    def __init__(self, popup):
+        self._popup, self._latest_data = popup, None
+
+    def geometry(self): return QRect(0, 0, 10, 10)
+
+
+def _trigger(popup):
+    from PyQt6.QtWidgets import QSystemTrayIcon
+
+    from ctfl.tray import TrayIcon
+    TrayIcon._on_activated(_StubTray(popup),
+                           QSystemTrayIcon.ActivationReason.Trigger)
+    return popup.calls
+
+
+def test_tray_click_hides_the_popup_the_user_is_looking_at():
+    assert _trigger(_StubPopup(visible=True, active=True)) == ["hide"]
+
+
+def test_tray_click_raises_a_visible_but_inactive_popup():
+    # The regression: as an ordinary window the popup can sit behind the
+    # browser, and hiding it there reads as the click doing nothing.
+    calls = _trigger(_StubPopup(visible=True, active=False))
+    assert "hide" not in calls
+    assert calls[-2:] == ["raise", "activate"]
+
+
+def test_tray_click_opens_a_hidden_popup():
+    calls = _trigger(_StubPopup(visible=False, active=False))
+    assert "hide" not in calls
+    assert "show" in calls

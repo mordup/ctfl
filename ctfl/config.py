@@ -7,6 +7,15 @@ class Config:
     def __init__(self) -> None:
         self._s = QSettings(APP_NAME, APP_NAME)
 
+    def sync(self) -> None:
+        """Flush pending writes to disk.
+
+        QSettings otherwise flushes when its destructor runs, which is too late
+        for _restart: the replacement process reads the file while the outgoing
+        one is still shutting down.
+        """
+        self._s.sync()
+
     def _get(self, key: str, default, typ=None):
         v = self._s.value(key, default)
         if typ is bool:

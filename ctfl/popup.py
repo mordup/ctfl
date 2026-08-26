@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+from collections import deque
 from datetime import datetime as _dt
 
-from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtCore import QSize, Qt, pyqtSignal
 from PyQt6.QtGui import QFont, QFontMetrics, QIcon
 from PyQt6.QtWidgets import (
     QApplication,
@@ -76,6 +77,31 @@ class PopupWidget(QWidget):
         self._config = config
         self.setWindowTitle("Claude Usage")
         self.setWindowIcon(QIcon.fromTheme(ICON_THEME_NAME))
+        # Only a size the *user* chose may be persisted. "The window was
+        # hidden" is not that: the tray builds a popup it may never show, and
+        # opening or closing one during a cold-start fetch is not a size
+        # choice. A never-shown window is covered for free -- _user_driven()
+        # requires isVisible(), so it can never be marked.
+        self._user_sized = False
+        # Geometry changes arrive as resize/move events whatever their origin,
+        # so the two the user did not cause are flagged out: _applying covers
+        # the resizes this code makes, _settling the ones the layout makes
+        # while a freshly-shown window finds its size.
+        self._applying = False
+        # Timing alone cannot separate our resizes from the user's: under a
+        # real window manager our resize comes back as a ConfigureNotify after
+        # the _applying flag is already clear, and that echo looks like a drag.
+        # So also keep the sizes this code asked for -- an echo matches one of
+        # them, a drag does not. A short history covers the intermediate sizes
+        # a single fit passes through.
+        #
+        # Only resizes count as the user choosing a size. Moves are excluded on
+        # purpose: window managers reposition windows on their own (observed
+        # placing this one at (1706, 513) during an ordinary refresh), and
+        # there is no reliable way to tell that from a drag. The cost is that
+        # moving the window without ever resizing it is not remembered; the
+        # position still rides along in saveGeometry() once a resize happens.
+        self._expected_sizes: deque = deque(maxlen=6)
         self._build_ui()
         self.setMinimumWidth(480)
 
@@ -225,6 +251,19 @@ class PopupWidget(QWidget):
         self._fit_to_content(allow_shrink=True)
 
     def _fit_to_content(self, allow_shrink: bool = False) -> None:
+        self._applying = True
+        try:
+            self._fit_to_content_inner(allow_shrink)
+        finally:
+            self._expected_sizes.append(self.size())
+            self._applying = False
+
+    def _resize_to(self, size) -> None:
+        """Resize, remembering the size asked for so its echo is not a drag."""
+        self._expected_sizes.append(size)
+        self.resize(size)
+
+    def _fit_to_content_inner(self, allow_shrink: bool = False) -> None:
         # Rows rebuilt by set_rows()/_update_limits() are still hidden at this
         # point: Qt shows freshly-added children when their posted show events
         # are delivered, not when they are added. QLayout::sizeHint() skips
@@ -278,17 +317,18 @@ class PopupWidget(QWidget):
             if allow_shrink:
                 # New data arrived — resize unconditionally so the window
                 # doesn't stay stuck at a larger stale size.
-                self.resize(self.sizeHint())
+                self._resize_to(self.sizeHint())
             else:
                 # Tab-switch path: only grow, to avoid yanking the window
                 # out from under the user's cursor.
                 current = self.size()
                 ideal = self.sizeHint()
                 if ideal.height() > current.height() or ideal.width() > current.width():
-                    self.resize(max(current.width(), ideal.width()),
-                                max(current.height(), ideal.height()))
+                    self._resize_to(QSize(max(current.width(), ideal.width()),
+                                          max(current.height(), ideal.height())))
         else:
             self.adjustSize()
+            self._expected_sizes.append(self.size())
         # setFixedHeight above pinned both bounds. Release them so the tab
         # area can follow the window the user resizes -- leaving the minimum
         # in place would stop them shrinking below the first-run size.
@@ -500,6 +540,15 @@ class PopupWidget(QWidget):
 
         self.move(x, y)
 
+    def _user_driven(self) -> bool:
+        return self.isVisible() and not self._applying
+
+    def resizeEvent(self, event) -> None:
+        if self._user_driven() and event.size() not in self._expected_sizes:
+            self._user_sized = True
+        super().resizeEvent(event)
+
+
     def restore_or_position(self, tray_geometry) -> bool:
         """Restore the user's saved geometry, or fall back to the tray corner.
 
@@ -508,14 +557,27 @@ class PopupWidget(QWidget):
         """
         saved = self._config.popup_geometry
         if saved and self.restoreGeometry(saved):
+            # restoreGeometry() re-fits an off-screen rect onto the current
+            # screen itself (verified on both the offscreen and xcb platforms),
+            # so no extra clamp is needed on this path.
+            self._user_sized = True   # it is the user's size, by definition
+            self._expected_sizes.append(self.size())
             return True
-        self.position_near_tray(tray_geometry)
+        self._applying = True
+        try:
+            self.position_near_tray(tray_geometry)
+        finally:
+            self._applying = False
         return False
 
     def _save_geometry(self) -> None:
         # Minimised windows report their restored-from geometry inconsistently
         # across platforms; skip rather than persist something unusable.
         if self.isMinimized():
+            return
+        if not self._user_sized:
+            # Shown and closed again without the user touching the frame, so
+            # saving would switch auto-fit off on their behalf.
             return
         self._config.popup_geometry = bytes(self.saveGeometry())
 

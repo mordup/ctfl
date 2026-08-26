@@ -268,13 +268,16 @@ class TrayIcon(QSystemTrayIcon):
             if self._popup.isVisible():
                 self._popup.hide()
             else:
-                # Render fresh data first so position_near_tray sizes the
-                # window to the current profile's content, not whatever was
-                # last shown.
+                # Render fresh data first so the first-run sizing reflects the
+                # current profile's content, not whatever was last shown.
                 if self._latest_data:
                     self._popup.update_data(self._latest_data)
-                self._popup.position_near_tray(self.geometry())
+                self._popup.restore_or_position(self.geometry())
                 self._popup.show()
+                # A normal window may be behind others or on another desktop;
+                # raising is what makes the tray click feel like a toggle.
+                self._popup.raise_()
+                self._popup.activateWindow()
 
     def refresh(self) -> None:
         if self._thread is not None and self._thread.isRunning():
@@ -629,14 +632,11 @@ class TrayIcon(QSystemTrayIcon):
         AboutDialog(self.contextMenu()).exec()
 
     def _show_settings(self) -> None:
-        was_popup_visible = self._popup.isVisible()
-        self._popup.hide()
+        # The popup stays put: it is an ordinary window now, so hiding it
+        # around the dialog would just make it flicker.
         dlg = SettingsDialog(self._config, self._credentials, self._autostart)
         dlg.settings_changed.connect(self._on_settings_changed)
         dlg.exec()
-        if was_popup_visible:
-            self._popup.show()
-            self._popup.activateWindow()
 
     def _on_settings_changed(self) -> None:
         self._start_timer()
@@ -676,6 +676,9 @@ class TrayIcon(QSystemTrayIcon):
     def _restart(self) -> None:
         self._cleanup_thread()
         self._cleanup_update_thread()
+        # Closing rather than dropping the window persists its geometry:
+        # neither hideEvent nor closeEvent fires on QApplication.quit().
+        self._popup.close()
         from PyQt6.QtCore import QProcess
         from PyQt6.QtWidgets import QApplication
         QProcess.startDetached(sys.executable, ["-m", APP_NAME])
@@ -684,5 +687,8 @@ class TrayIcon(QSystemTrayIcon):
     def _quit(self) -> None:
         self._cleanup_thread()
         self._cleanup_update_thread()
+        # Same reason as _restart: quitting with the window open would
+        # otherwise discard the size the user chose.
+        self._popup.close()
         from PyQt6.QtWidgets import QApplication
         QApplication.quit()

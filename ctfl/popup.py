@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime as _dt
 
-from PyQt6.QtCore import QEvent, Qt, pyqtSignal
+from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QFont, QFontMetrics, QIcon
 from PyQt6.QtWidgets import (
     QApplication,
@@ -61,7 +61,9 @@ def _wrap_in_scroll(widget: QWidget) -> QScrollArea:
     area.setWidgetResizable(True)
     area.setFrameShape(QScrollArea.Shape.NoFrame)
     area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-    area.setMaximumHeight(_TAB_CONTENT_MAX_HEIGHT)
+    # No maximum height: the tab area grows with the window the user sized.
+    # _TAB_CONTENT_MAX_HEIGHT still bounds the *initial* size (see
+    # _fit_to_content); past that the scrollbar inside the tab takes over.
     return area
 
 
@@ -70,11 +72,7 @@ class PopupWidget(QWidget):
     settings_requested = pyqtSignal()
 
     def __init__(self, config: Config, parent=None) -> None:
-        super().__init__(
-            parent,
-            Qt.WindowType.Tool
-            | Qt.WindowType.WindowStaysOnTopHint,
-        )
+        super().__init__(parent, Qt.WindowType.Window)
         self._config = config
         self.setWindowTitle("Claude Usage")
         self.setWindowIcon(QIcon.fromTheme(ICON_THEME_NAME))
@@ -241,20 +239,27 @@ class PopupWidget(QWidget):
         # profile-switch fixes never covered the refresh path.
         QApplication.sendPostedEvents()
 
-        # Size the popup to fit the active tab's content, up to the scroll
-        # area's max height. When content exceeds the max, the scrollbar
-        # inside the tab takes over and the popup caps at that height.
-        active_scroll = self._tabs.currentWidget()
-        inner = active_scroll.widget() if isinstance(active_scroll, QScrollArea) else None
-        if inner is not None:
+        # Once the user has sized the window, that size is authoritative --
+        # never resize under them, on refresh or otherwise.
+        if self._config.popup_geometry:
+            return
+
+        # First run only: size to the *tallest* tab rather than the current
+        # one, so switching tabs never moves the window. Layouts of hidden
+        # tabs report correct sizeHints, so all three can be measured here.
+        content_h = 0
+        for i in range(self._tabs.count()):
+            page = self._tabs.widget(i)
+            inner = page.widget() if isinstance(page, QScrollArea) else None
+            if inner is None:
+                continue
             # Read the layout's sizeHint directly rather than the widget's,
             # since the widget's sizeHint may reflect its current geometry
             # (stretched by the scroll area) rather than its content.
             layout = inner.layout()
-            if layout is not None:
-                content_h = layout.sizeHint().height()
-            else:
-                content_h = inner.sizeHint().height()
+            hint = layout.sizeHint().height() if layout is not None else inner.sizeHint().height()
+            content_h = max(content_h, hint)
+        if content_h:
             capped = min(content_h, _TAB_CONTENT_MAX_HEIGHT)
             tab_bar_h = self._tabs.tabBar().sizeHint().height()
             self._tabs.setFixedHeight(capped + tab_bar_h + 8)
@@ -284,6 +289,10 @@ class PopupWidget(QWidget):
                                 max(current.height(), ideal.height()))
         else:
             self.adjustSize()
+        # setFixedHeight above pinned both bounds. Release them so the tab
+        # area can follow the window the user resizes -- leaving the minimum
+        # in place would stop them shrinking below the first-run size.
+        self._tabs.setMinimumHeight(0)
         self._tabs.setMaximumHeight(16777215)
 
     def _update_limits(self, limits: list[RateLimitInfo]) -> None:
@@ -491,10 +500,32 @@ class PopupWidget(QWidget):
 
         self.move(x, y)
 
-    def changeEvent(self, event: QEvent) -> None:
-        if event.type() == QEvent.Type.ActivationChange and not self.isActiveWindow():
-            self.hide()
-        super().changeEvent(event)
+    def restore_or_position(self, tray_geometry) -> bool:
+        """Restore the user's saved geometry, or fall back to the tray corner.
+
+        Returns True when a saved geometry was applied, which also means the
+        popup must not resize itself afterwards.
+        """
+        saved = self._config.popup_geometry
+        if saved and self.restoreGeometry(saved):
+            return True
+        self.position_near_tray(tray_geometry)
+        return False
+
+    def _save_geometry(self) -> None:
+        # Minimised windows report their restored-from geometry inconsistently
+        # across platforms; skip rather than persist something unusable.
+        if self.isMinimized():
+            return
+        self._config.popup_geometry = bytes(self.saveGeometry())
+
+    def closeEvent(self, event) -> None:
+        self._save_geometry()
+        super().closeEvent(event)
+
+    def hideEvent(self, event) -> None:
+        self._save_geometry()
+        super().hideEvent(event)
 
 
 class _BarChartWidget(QWidget):

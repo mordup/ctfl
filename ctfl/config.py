@@ -1,4 +1,4 @@
-from PyQt6.QtCore import QSettings
+from PyQt6.QtCore import QByteArray, QSettings
 
 from .constants import APP_NAME
 
@@ -19,6 +19,27 @@ class Config:
             except (ValueError, TypeError):
                 return default
         return v
+
+    @property
+    def popup_geometry(self) -> bytes | None:
+        """Saved popup window geometry, or None before the user has sized it.
+
+        Stored as the QByteArray from QWidget.saveGeometry(); its presence is
+        what tells the popup to stop auto-sizing itself and honour the user.
+        """
+        v = self._s.value("popup_geometry")
+        if isinstance(v, QByteArray):
+            return bytes(v) or None
+        if isinstance(v, (bytes, bytearray)):
+            return bytes(v) or None
+        return None
+
+    @popup_geometry.setter
+    def popup_geometry(self, v: bytes | None) -> None:
+        if v:
+            self._s.setValue("popup_geometry", QByteArray(bytes(v)))
+        else:
+            self._s.remove("popup_geometry")
 
     @property
     def data_source(self) -> str:

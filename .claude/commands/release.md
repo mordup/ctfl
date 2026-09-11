@@ -1,12 +1,35 @@
 Release workflow for the ctfl project. Follow these steps exactly:
 
-## 1. Audit the codebase
+## 1. Audit the diff
 
-Run a full audit before releasing. Launch the code-auditor agent, the quality-analyst agent, and the `docs-freshness` skill in parallel to check for:
-- Security vulnerabilities, resource leaks, correctness bugs
-- UX consistency, edge cases, behavioral issues
-- Unused imports, dead code
-- Drift between the app and the ctfl-docs site (copy + screenshots)
+Audit what changed since the last tag, not the whole package. A full-tree
+sweep on a small release re-reads unchanged code and mostly repeats earlier
+findings: the 2.9.1 audit returned 20 items for a one-file diff, 19 of them
+outside it.
+
+First establish the scope:
+```bash
+git diff --stat $(git describe --tags --abbrev=0)..HEAD
+git log --oneline $(git describe --tags --abbrev=0)..HEAD
+```
+
+Then, in parallel:
+- Always run the `docs-freshness` skill. It is a cheap script and its value
+  is the punch-list discipline, so it is never skipped.
+- Launch the code-auditor and quality-analyst agents only when the range
+  touches a file under `ctfl/` beyond table or string edits (pricing rows,
+  changelog text, labels). Give each agent the commit range and the touched
+  files plus their direct callers, and ask it to review only those:
+  - Security vulnerabilities, resource leaks, correctness bugs
+  - UX consistency, edge cases, behavioral issues
+  - Unused imports, dead code
+  Findings outside that scope go in the release report for later, not into
+  pre-release fixes.
+- When the agents are skipped, say so in the release report so it is a
+  visible decision rather than a silent omission.
+
+The smoke test in step 7 stays unconditional; it is the only check that
+exercises the built artifact.
 
 **An agent that returns without an explicit findings section has not finished — it was cut off.** Silence is not a clean audit. Resume it (`SendMessage` to its id) and ask for its results before believing them. During the 2.8.0 release the code-auditor came back with only its opening sentence; resuming it surfaced a bug that had been inflating every token and cost figure by 2.2x. A genuinely clean result says so explicitly, e.g. "no findings at CONFIRMED or HIGH".
 
@@ -14,11 +37,22 @@ Run a full audit before releasing. Launch the code-auditor agent, the quality-an
 
 **Only fix findings with confidence CONFIRMED or HIGH.** Skip PROBABLE/POSSIBLE/SPECULATIVE — those need investigation, not a rushed fix before release. Exception: a defect you have demonstrated directly is CONFIRMED regardless of how the agent rated it.
 
-If code fixes are needed, apply them and commit using `/commit` before proceeding.
+If code fixes are needed, apply them and commit using `/commit` before proceeding,
+with one adjustment to its one-commit-per-unit rule so the log stays readable:
+
+- A fix that changes what the user sees (a figure, a label, a window, a
+  setting's effect) gets its own commit. It earns its own release-note line
+  and may need reverting on its own.
+- Every other audit fix — hardening, error wording, dead code, stale
+  comments — goes into a single `fix: address release audit findings` commit
+  with one bullet per item in the body.
+
+The 2.9.1 release split all seven audit fixes into seven commits; under this
+rule it would have been four.
 
 For each item in the docs-freshness punch list, ask the user whether to update docs now (blocks the release), defer with an explicit ticket, or ship as-is. Don't silently skip.
 
-**Also re-check what was deferred last release.** The punch list is generated from current state, so an item deferred with a ticket never reappears on its own — "defer" quietly becomes "drop". Read back the tickets raised at the previous release and ask about each again. As of 2.8.0 two are still open: the "verification failed" troubleshooting note in updating.md, and two passages stating monthly spend is Enterprise-only when it is not.
+**Also re-check what was deferred last release.** The punch list is generated from current state, so an item deferred with a ticket never reappears on its own — "defer" quietly becomes "drop". Read back the tickets raised at the previous release and ask about each again. As of 2.9.1 three are still open: the "verification failed" troubleshooting note in updating.md, a getting-started.md section describing the popup as an ordinary window (resizable, remembers its size, stays open on focus loss), and four screenshots that predate 2.9.0 (rate_limits, tray_overlay, usage_daily, usage_models). Note `scripts/docs-freshness.sh` will not surface the screenshots itself; check them by eye.
 
 ## 2. Check for uncommitted changes
 

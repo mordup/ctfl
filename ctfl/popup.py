@@ -179,7 +179,7 @@ class PopupWidget(QWidget):
             parts.append(today_text)
         total_text = f"Period total: {format_tokens(total_tokens)} tokens"
         total_cost = _period_cost(data.daily)
-        if total_cost:
+        if total_cost is not None:
             total_text += f" · {format_cost(total_cost)}"
         parts.append(total_text)
 

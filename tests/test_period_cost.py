@@ -40,3 +40,8 @@ def test_empty_period():
 def test_zero_cost_days_are_not_treated_as_missing():
     days = [_day("2026-07-29", 0.0), _day("2026-07-28", 0.0)]
     assert _period_cost(days) == 0.0
+
+
+def test_zero_cost_period_is_a_known_figure():
+    # $0.00 with every day priced is a real total, distinct from "unknown".
+    assert _period_cost([_day("2026-07-29", 0.0)]) == 0.0

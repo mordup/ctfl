@@ -194,11 +194,10 @@ def _update_appimage(release: dict) -> str | None:
     tmp = target.with_suffix(".tmp")
     try:
         fd = os.open(str(tmp), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o755)
-        try:
-            os.write(fd, new_data)
-            os.fsync(fd)
-        finally:
-            os.close(fd)
+        with os.fdopen(fd, "wb") as f:
+            f.write(new_data)
+            f.flush()
+            os.fsync(f.fileno())
         tmp.rename(target)
     except OSError as e:
         tmp.unlink(missing_ok=True)

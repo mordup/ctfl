@@ -196,6 +196,7 @@ class SettingsDialog(QDialog):
         if checked:
             needs_api = id_ in (1, 2)
             self._api_group.setEnabled(needs_api)
+            self._estimate_costs_check.setEnabled(id_ != 1)
 
     def _load(self) -> None:
         source = self._config.data_source

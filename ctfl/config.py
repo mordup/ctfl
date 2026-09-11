@@ -75,14 +75,6 @@ class Config:
         self._s.setValue("refresh_interval", v)
 
     @property
-    def autostart(self) -> bool:
-        return self._get("autostart", False, bool)
-
-    @autostart.setter
-    def autostart(self, v: bool) -> None:
-        self._s.setValue("autostart", v)
-
-    @property
     def days_to_show(self) -> int:
         return self._get("days_to_show", 7, int)
 

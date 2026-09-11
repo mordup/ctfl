@@ -58,7 +58,6 @@ _FAST_PRICING: dict[str, tuple[float, float, float, float, float]] = {
 _INTRO_PRICING: dict[str, tuple[str, tuple[float, float, float, float, float]]] = {}
 
 
-
 def _normalize(model: str) -> str:
     """Reduce a full model name to its pricing family key.
 

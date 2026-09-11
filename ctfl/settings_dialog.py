@@ -303,10 +303,8 @@ class SettingsDialog(QDialog):
         try:
             if self._autostart_check.isChecked():
                 self._autostart.enable()
-                self._config.autostart = True
             else:
                 self._autostart.disable()
-                self._config.autostart = False
         except Exception as e:
             QMessageBox.warning(self, "Error", str(e))
             return

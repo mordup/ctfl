@@ -67,8 +67,6 @@ class LocalProvider:
     def fetch(self, days: int) -> UsageData:
         try:
             return self._fetch(days)
-        except json.JSONDecodeError:
-            return UsageData(error="Local: corrupt stats-cache file")
         except PermissionError:
             return UsageData(error="Local: cannot read Claude data files")
         except OSError as e:
@@ -137,7 +135,8 @@ class LocalProvider:
             long_context_total,
         ) = self._scan_jsonl_files(projects_dir, cache_cutoff, cutoff_date)
 
-        # JSONL data takes precedence for overlapping dates
+        # The cache covers days up to lastComputedDate, the JSONL scan the days
+        # after it, so the two never overlap.
         for date_str, day in jsonl_daily.items():
             daily_map[date_str] = day
 

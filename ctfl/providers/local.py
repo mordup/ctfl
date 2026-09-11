@@ -81,7 +81,7 @@ class LocalProvider:
         stats_file = instance.stats_file
         projects_dir = instance.projects_dir
 
-        cutoff_date = (datetime.now(UTC) - timedelta(days=days)).strftime(DATE_FMT_ISO)
+        cutoff_date = (datetime.now(UTC) - timedelta(days=days - 1)).strftime(DATE_FMT_ISO)
         cache_data = self._read_stats_cache(stats_file)
         cache_cutoff = cache_data.get("lastComputedDate", "")
 

@@ -3,14 +3,14 @@
 from __future__ import annotations
 
 # Per-million-token pricing (USD), from platform.claude.com/docs/en/about-claude/pricing
-# as of July 2026. Anthropic quotes list prices exclusive of tax.
+# as of September 2026. Anthropic quotes list prices exclusive of tax.
 #
 # Each entry: (input, output, cache_read, cache_write_5m, cache_write_1h)
 #
 # The two cache-write rates are separate products, not a single "cache creation"
 # price: a 5-minute-TTL write costs 1.25x input, a 1-hour-TTL write costs 2x.
 # Claude Code uses both, so the JSONL breakdown decides which applies.
-# cache_read is 0.1x input for every model.
+# cache_read is 0.1x input for every model except Fable/Mythos 5.1 (0.025x).
 #
 # Every id is enumerated and matched exactly after normalisation — not by
 # prefix. Prefix matching would hand a future claude-opus-4-9 the legacy
@@ -20,6 +20,8 @@ from __future__ import annotations
 # missing entry visible instead of silently mispriced.
 _PRICING: dict[str, tuple[float, float, float, float, float]] = {
     # Fable / Mythos
+    "fable-5-1":  (10.00, 50.00, 0.25, 12.50, 20.00),
+    "mythos-5-1": (10.00, 50.00, 0.25, 12.50, 20.00),
     "fable-5":    (10.00, 50.00, 1.00, 12.50, 20.00),
     "mythos-5":   (10.00, 50.00, 1.00, 12.50, 20.00),
     # Current Opus tier
@@ -32,9 +34,8 @@ _PRICING: dict[str, tuple[float, float, float, float, float]] = {
     "opus-4-1":   (15.00, 75.00, 1.50, 18.75, 30.00),
     "opus-4-0":   (15.00, 75.00, 1.50, 18.75, 30.00),
     "opus-4":     (15.00, 75.00, 1.50, 18.75, 30.00),
-    # Sonnet. Sonnet 5 runs introductory pricing ($2/$10) through 2026-08-31;
-    # the standard rate is used here rather than adding expiring date logic.
-    "sonnet-5":   ( 3.00, 15.00, 0.30,  3.75,  6.00),
+    # Sonnet. Sonnet 5's $2/$10 launch rate was made permanent in September 2026.
+    "sonnet-5":   ( 2.00, 10.00, 0.20,  2.50,  4.00),
     "sonnet-4-6": ( 3.00, 15.00, 0.30,  3.75,  6.00),
     "sonnet-4-5": ( 3.00, 15.00, 0.30,  3.75,  6.00),
     "sonnet-4":   ( 3.00, 15.00, 0.30,  3.75,  6.00),
@@ -54,9 +55,7 @@ _FAST_PRICING: dict[str, tuple[float, float, float, float, float]] = {
 # Time-limited launch pricing: family key -> (last date inclusive, rates).
 # Usage on or before the cutoff bills at the promotional rate; after it, the
 # standard _PRICING entry applies. Dates are ISO, so string comparison is safe.
-_INTRO_PRICING: dict[str, tuple[str, tuple[float, float, float, float, float]]] = {
-    "sonnet-5": ("2026-08-31", (2.00, 10.00, 0.20, 2.50, 4.00)),
-}
+_INTRO_PRICING: dict[str, tuple[str, tuple[float, float, float, float, float]]] = {}
 
 
 

@@ -1,8 +1,12 @@
+from ctfl.providers import pricing
 from ctfl.providers.pricing import _match_pricing, _normalize, estimate_daily_cost
 
 _OPUS_CURRENT = (5.00, 25.00, 0.50, 6.25, 10.00)
 _OPUS_LEGACY = (15.00, 75.00, 1.50, 18.75, 30.00)
 _SONNET = (3.00, 15.00, 0.30, 3.75, 6.00)
+_SONNET_5 = (2.00, 10.00, 0.20, 2.50, 4.00)
+_FABLE_5 = (10.00, 50.00, 1.00, 12.50, 20.00)
+_FABLE_5_1 = (10.00, 50.00, 0.25, 12.50, 20.00)
 
 
 # --- _normalize ---
@@ -30,11 +34,16 @@ def test_opus_5_long_context_variant():
 
 
 def test_sonnet_5():
-    assert _match_pricing("claude-sonnet-5") == _SONNET
+    assert _match_pricing("claude-sonnet-5") == _SONNET_5
 
 
 def test_fable_5():
-    assert _match_pricing("claude-fable-5") == (10.00, 50.00, 1.00, 12.50, 20.00)
+    assert _match_pricing("claude-fable-5") == _FABLE_5
+
+
+def test_fable_5_1_has_cheaper_cache_reads():
+    assert _match_pricing("claude-fable-5-1") == _FABLE_5_1
+    assert _match_pricing("claude-mythos-5-1") == _FABLE_5_1
 
 
 def test_haiku_4_5():
@@ -107,7 +116,7 @@ def test_multiple_known_models_sum():
         ("claude-opus-5", "standard"): (1_000_000, 0, 0, 0, 0),
         ("claude-sonnet-5", "standard"): (1_000_000, 0, 0, 0, 0),
     })
-    assert cost == 8.00
+    assert cost == 7.00
 
 
 def test_unknown_model_suppresses_whole_day():
@@ -213,7 +222,7 @@ def test_fast_mode_unsupported_model_bills_standard():
 
 
 def test_fast_mode_on_sonnet_bills_standard():
-    assert _match_pricing("claude-sonnet-5", speed="fast") == _SONNET
+    assert _match_pricing("claude-sonnet-5", speed="fast") == _SONNET_5
 
 
 def test_standard_speed_is_the_default():
@@ -228,38 +237,42 @@ def test_same_model_at_both_speeds_priced_separately():
     assert cost == 5.00 + 10.00
 
 
-# --- Sonnet 5 introductory pricing ---
+# --- Introductory pricing ---
 
-_SONNET_5_INTRO = (2.00, 10.00, 0.20, 2.50, 4.00)
-
-
-def test_sonnet_5_intro_rate_within_window():
-    assert _match_pricing("claude-sonnet-5", date="2026-07-29") == _SONNET_5_INTRO
+_PROMO = (1.00, 2.00, 0.10, 1.25, 2.00)
 
 
-def test_sonnet_5_intro_rate_on_last_day():
-    assert _match_pricing("claude-sonnet-5", date="2026-08-31") == _SONNET_5_INTRO
+def test_sonnet_5_rate_is_date_independent():
+    # The launch rate became permanent, so no date may flip it back to $3/$15.
+    assert _match_pricing("claude-sonnet-5", date="2026-08-31") == _SONNET_5
+    assert _match_pricing("claude-sonnet-5", date="2026-09-01") == _SONNET_5
+    assert _match_pricing("claude-sonnet-5") == _SONNET_5
 
 
-def test_sonnet_5_standard_rate_after_window():
-    assert _match_pricing("claude-sonnet-5", date="2026-09-01") == _SONNET
+def test_intro_rate_within_window(monkeypatch):
+    monkeypatch.setattr(pricing, "_INTRO_PRICING", {"opus-5": ("2026-08-31", _PROMO)})
+    assert _match_pricing("claude-opus-5", date="2026-07-29") == _PROMO
+    assert _match_pricing("claude-opus-5", date="2026-08-31") == _PROMO
 
 
-def test_sonnet_5_without_date_uses_standard():
+def test_intro_rate_expires_after_window(monkeypatch):
+    monkeypatch.setattr(pricing, "_INTRO_PRICING", {"opus-5": ("2026-08-31", _PROMO)})
+    assert _match_pricing("claude-opus-5", date="2026-09-01") == _OPUS_CURRENT
+
+
+def test_intro_rate_without_date_uses_standard(monkeypatch):
     # Undated callers get the durable rate rather than an expiring promotion.
-    assert _match_pricing("claude-sonnet-5") == _SONNET
+    monkeypatch.setattr(pricing, "_INTRO_PRICING", {"opus-5": ("2026-08-31", _PROMO)})
+    assert _match_pricing("claude-opus-5") == _OPUS_CURRENT
 
 
-def test_intro_pricing_does_not_leak_to_other_models():
-    assert _match_pricing("claude-sonnet-4-6", date="2026-07-29") == _SONNET
-    assert _match_pricing("claude-opus-5", date="2026-07-29") == _OPUS_CURRENT
+def test_intro_pricing_does_not_leak_to_other_models(monkeypatch):
+    monkeypatch.setattr(pricing, "_INTRO_PRICING", {"opus-5": ("2026-08-31", _PROMO)})
+    assert _match_pricing("claude-opus-4-8", date="2026-07-29") == _OPUS_CURRENT
 
 
-def test_estimate_uses_intro_rate_for_dated_day():
-    tokens = {("claude-sonnet-5", "standard"): (1_000_000, 1_000_000, 0, 0, 0)}
-    assert estimate_daily_cost(tokens, date="2026-08-15") == 12.00  # $2 + $10
-
-
-def test_estimate_uses_standard_rate_after_cutover():
-    tokens = {("claude-sonnet-5", "standard"): (1_000_000, 1_000_000, 0, 0, 0)}
-    assert estimate_daily_cost(tokens, date="2026-09-01") == 18.00  # $3 + $15
+def test_estimate_uses_intro_rate_for_dated_day(monkeypatch):
+    monkeypatch.setattr(pricing, "_INTRO_PRICING", {"opus-5": ("2026-08-31", _PROMO)})
+    tokens = {("claude-opus-5", "standard"): (1_000_000, 1_000_000, 0, 0, 0)}
+    assert estimate_daily_cost(tokens, date="2026-08-15") == 3.00  # $1 + $2
+    assert estimate_daily_cost(tokens, date="2026-09-01") == 30.00  # $5 + $25

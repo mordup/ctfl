@@ -433,11 +433,13 @@ def _save_org_id(credentials_file: Path, org_id: str) -> None:
     try:
         _CACHE_DIR.mkdir(parents=True, exist_ok=True, mode=0o700)
         cache_file = _org_cache_file(credentials_file)
-        fd = os.open(str(cache_file), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        tmp = cache_file.with_suffix(".tmp")
+        fd = os.open(str(tmp), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
         try:
             os.write(fd, org_id.encode())
         finally:
             os.close(fd)
+        tmp.rename(cache_file)
     except OSError:
         pass
 

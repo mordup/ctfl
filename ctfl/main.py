@@ -31,8 +31,11 @@ def main() -> int:
     try:
         lock_file = open(lock_path, "w")
         fcntl.flock(lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
-    except OSError:
+    except BlockingIOError:
         print(f"{APP_DISPLAY_NAME} is already running.", file=sys.stderr)
+        return 1
+    except OSError as e:
+        print(f"Cannot create lock file {lock_path}: {e}", file=sys.stderr)
         return 1
 
     config = Config()

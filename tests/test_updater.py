@@ -412,6 +412,12 @@ def test_installed_version_without_assignment(tmp_path):
     assert installed_version(tmp_path) is None
 
 
+def test_installed_version_torn_read_inside_a_multibyte_character(tmp_path):
+    raw = '__version__ = "9.0.0"\n__changelog__ = ("Popup — fixed",)\n'.encode()
+    (tmp_path / "__init__.py").write_bytes(raw[: raw.index("—".encode()) + 1])
+    assert installed_version(tmp_path) == "9.0.0"
+
+
 def test_installed_version_matches_running_package():
     from ctfl import __version__
     assert installed_version() == __version__

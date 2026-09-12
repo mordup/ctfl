@@ -91,8 +91,8 @@ def installed_version(pkg_dir: Path | None = None) -> str | None:
     if pkg_dir is None:
         pkg_dir = Path(__file__).resolve().parent
     try:
-        text = (pkg_dir / "__init__.py").read_text()
-    except OSError:
+        text = (pkg_dir / "__init__.py").read_text(encoding="utf-8", errors="replace")
+    except (OSError, ValueError):
         return None
     match = _VERSION_RE.search(text)
     return match.group(1) if match else None

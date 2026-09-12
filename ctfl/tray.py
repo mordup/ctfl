@@ -118,6 +118,7 @@ class TrayIcon(QSystemTrayIcon):
         self._update_thread: QThread | None = None
         self._latest_data: UsageData | None = None
         self._pending_release: dict | None = None
+        self._installed_version: str | None = None
         self._dialogs: dict[str, QDialog] = {}
         self._warned_limits: set[str] = set()
 
@@ -506,6 +507,10 @@ class TrayIcon(QSystemTrayIcon):
             self._update_worker = None
 
     def _on_update_check_done(self, release) -> None:
+        # Once an update is installed the running process can only restart;
+        # a newer release found meanwhile is picked up after that.
+        if self._installed_version:
+            return
         if release is None:
             if getattr(self, "_manual_update_check", False):
                 self._manual_update_check = False
@@ -522,6 +527,7 @@ class TrayIcon(QSystemTrayIcon):
         self._pending_release = release
         version = release["version"]
         self._update_action.setText(f"Update to v{version}")
+        self._update_action.setEnabled(True)
 
         from .updater import can_auto_update
         if can_auto_update():
@@ -540,7 +546,9 @@ class TrayIcon(QSystemTrayIcon):
             )
 
     def _on_update_action(self) -> None:
-        if self._pending_release:
+        if self._installed_version:
+            self._restart()
+        elif self._pending_release:
             self._show_update_dialog(self._pending_release)
         else:
             self._update_action.setText("Checking...")
@@ -644,13 +652,15 @@ class TrayIcon(QSystemTrayIcon):
         version = self._pending_release["version"]
         if error:
             self._show_dialog(
-                "update-result",
+                "update-failed",
                 lambda: QMessageBox(QMessageBox.Icon.Warning, "Update Failed", error),
             )
             self._update_action.setText(f"Update to v{version}")
-            self._update_action.setEnabled(True)
         else:
-            self._show_dialog("update-result", lambda: self._make_restart_dialog(version))
+            self._installed_version = version
+            self._update_action.setText(f"Restart to use v{version}")
+            self._show_dialog("update-restart", lambda: self._make_restart_dialog(version))
+        self._update_action.setEnabled(True)
 
     def _make_restart_dialog(self, version: str) -> QDialog:
         from PyQt6.QtWidgets import QMessageBox

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import html
+
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QIcon
 from PyQt6.QtWidgets import QDialog, QDialogButtonBox, QLabel, QVBoxLayout
@@ -29,10 +31,11 @@ class AboutDialog(QDialog):
         title_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(title_label)
 
+        items = "".join(f"<li>{html.escape(line)}</li>" for line in __changelog__)
         changelog_label = QLabel(
-            f"<b>Changelog</b><br>{__changelog__}"
+            "<p align='center'><b>Changelog</b></p>"
+            f"<ul style='margin: 0; -qt-list-indent: 1'>{items}</ul>"
         )
-        changelog_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         changelog_label.setWordWrap(True)
         changelog_label.setContentsMargins(10, 8, 10, 8)
         changelog_label.setStyleSheet(

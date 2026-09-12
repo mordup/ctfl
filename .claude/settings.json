@@ -1,5 +1,9 @@
 {
   "permissions": {
+    "allow": [
+      "Bash(bash scripts/dev-run.sh:*)",
+      "Bash(bash scripts/smoke.sh:*)"
+    ],
     "deny": [
       "Bash(rm -rf /)",
       "Bash(git push --force:*)",
@@ -30,18 +34,8 @@
             "statusMessage": "Running ruff..."
           }
         ]
-      },
-      {
-        "matcher": "Write|Edit",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "jq -r '.tool_response.filePath // .tool_input.file_path' | { read -r f; case \"$f\" in */ctfl/*.py|*/tests/*.py) python -m pytest tests/ -q --tb=short ;; esac; } 2>/dev/null || true",
-            "timeout": 30,
-            "statusMessage": "Running tests..."
-          }
-        ]
       }
     ]
   }
 }
+

@@ -32,7 +32,6 @@ pkg/
 src/
 
 # Claude
-CLAUDE.md
 .claude/settings.local.json
 .claude/agent-memory/
 # Workflow scripts are written here by the Workflow tool on every run. Unlike

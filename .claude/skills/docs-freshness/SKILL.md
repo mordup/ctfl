@@ -53,5 +53,6 @@ decision during release rather than a vague reminder that gets skipped.
 
 ## When invoked
 
-- Release workflow step 1, alongside code-auditor and quality-analyst.
+- Release workflow step 2, only when the range since the last tag has a
+  `feat:` commit or touches a UI source file. Bugfix-only releases skip it.
 - Ad-hoc when the user asks "are the docs fresh?" or similar.

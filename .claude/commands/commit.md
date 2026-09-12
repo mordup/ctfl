@@ -11,7 +11,6 @@ If either check required code changes, include those changes in the commit.
 ## 2. Prepare commit
 
 - Run `git status` and `git diff` to review all changes (staged + unstaged)
-- Run `git log --oneline -5` to see recent commit style
 
 ## 3. Split into logical commits
 
@@ -24,6 +23,9 @@ Examples of good splits:
 - 3 independent bug fixes = three commits
 
 If all changes are part of the same logical unit, a single commit is fine.
+
+Decide the split yourself and go. Never ask the user to confirm the grouping
+or the messages; report them afterwards.
 
 ## 4. Stage and commit (repeat per logical commit)
 

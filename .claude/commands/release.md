@@ -1,110 +1,90 @@
-Release workflow for the ctfl project. Follow these steps exactly:
+Release workflow for the ctfl project. It has exactly two stops: one
+checkpoint after the audit (step 4) and the GUI look at the built package
+(step 8). Everything else runs without asking.
 
-## 1. Audit the diff
+## 1. Commit and scope
 
-Audit what changed since the last tag, not the whole package. A full-tree
-sweep on a small release re-reads unchanged code and mostly repeats earlier
-findings: the 2.9.1 audit returned 20 items for a one-file diff, 19 of them
-outside it.
+If `git status` shows uncommitted changes, run `/commit` first; the release
+covers everything committed, so pending work has to land before the range
+is measured.
 
-First establish the scope:
+Scope is the change since the last tag, never the whole package:
 ```bash
 git diff --stat $(git describe --tags --abbrev=0)..HEAD
 git log --oneline $(git describe --tags --abbrev=0)..HEAD
 ```
 
-Then, in parallel:
-- Always run the `docs-freshness` skill. It is a cheap script and its value
-  is the punch-list discipline, so it is never skipped.
+If the log is empty, say there is nothing to release and stop.
+
+## 2. Audit the diff
+
+In parallel:
+- Run the `docs-freshness` skill only when the range has a `feat:` commit or
+  touches `ctfl/popup.py`, `tray.py`, `settings_dialog.py` or
+  `about_dialog.py`. Bugfix-only releases skip it; the report just lists
+  `.claude/docs-deferred.md`.
 - Launch the code-auditor and quality-analyst agents only when the range
   touches a file under `ctfl/` beyond table or string edits (pricing rows,
-  changelog text, labels). Give each agent the commit range and the touched
-  files plus their direct callers, and ask it to review only those:
-  - Security vulnerabilities, resource leaks, correctness bugs
-  - UX consistency, edge cases, behavioral issues
-  - Unused imports, dead code
-  Findings outside that scope go in the release report for later, not into
-  pre-release fixes.
-- When the agents are skipped, say so in the release report so it is a
-  visible decision rather than a silent omission.
+  changelog entries, labels). Give each the commit range and the touched
+  files plus their direct callers, and ask for exactly that scope: security,
+  resource leaks, correctness; UX consistency, edge cases; dead code.
+  Findings outside the scope go in the release report, not into fixes.
+  When the agents are skipped, say so in the release report.
 
-The smoke test in step 7 stays unconditional; it is the only check that
-exercises the built artifact.
+An agent that returns without an explicit findings section was cut off, not
+clean. Resume it (`SendMessage` to its id) and get its results. A clean result
+says so explicitly, e.g. "no findings at CONFIRMED or HIGH".
 
-**An agent that returns without an explicit findings section has not finished — it was cut off.** Silence is not a clean audit. Resume it (`SendMessage` to its id) and ask for its results before believing them. During the 2.8.0 release the code-auditor came back with only its opening sentence; resuming it surfaced a bug that had been inflating every token and cost figure by 2.2x. A genuinely clean result says so explicitly, e.g. "no findings at CONFIRMED or HIGH".
+Reproduce a CONFIRMED finding yourself before acting on it. Fix only
+CONFIRMED or HIGH; a defect you demonstrated directly counts as CONFIRMED
+whatever the agent said. Lower tiers go in the report.
 
-**Verify a CONFIRMED finding yourself before acting on it.** Agents are sometimes wrong, and the fix is often invasive. Reproduce it against real data first.
+Commit fixes with `/commit`, with one adjustment to its one-commit-per-unit
+rule: a fix that changes what the user sees (a figure, a label, a window, a
+setting's effect) gets its own commit; every other audit fix (hardening,
+wording, dead code, comments) goes into a single
+`fix: address release audit findings` commit with one bullet per item.
 
-**Only fix findings with confidence CONFIRMED or HIGH.** Skip PROBABLE/POSSIBLE/SPECULATIVE — those need investigation, not a rushed fix before release. Exception: a defect you have demonstrated directly is CONFIRMED regardless of how the agent rated it.
+## 3. Prepare the release content
 
-If code fixes are needed, apply them and commit using `/commit` before proceeding,
-with one adjustment to its one-commit-per-unit rule so the log stays readable:
+Do all of this before saying anything to the user.
 
-- A fix that changes what the user sees (a figure, a label, a window, a
-  setting's effect) gets its own commit. It earns its own release-note line
-  and may need reverting on its own.
-- Every other audit fix — hardening, error wording, dead code, stale
-  comments — goes into a single `fix: address release audit findings` commit
-  with one bullet per item in the body.
+- Propose the version from the commit types since the last tag: any `feat:`
+  means a minor bump, otherwise patch. The user may have named one already.
+- Draft the in-app changelog, `__changelog__` in `ctfl/__init__.py`: a tuple
+  of strings, one per user-facing change, rendered as bullets in the About
+  dialog. Each entry is a short phrase, under about eight words, stating what
+  changed: no justification, no "it used to", no internal field names.
+  User-facing means features, UX changes, bugs the user would notice,
+  security fixes. Skip dependency bumps, refactors, tests, tooling, agent or
+  skill changes.
+- Draft the GitHub release notes covering everything since the last tag,
+  grouped under "### Features", "### Fixes", "### Security", "### Internal".
+  One line per item, stating what changed and, where not obvious, why it was
+  wrong. Detail belongs in the commit messages. Never restate one change in
+  two sections.
+- When docs-freshness ran, read `.claude/docs-deferred.md`, merge its entries
+  with the punch list, and choose a default per item: "defer" unless the docs
+  state something now false, in which case "fix now".
 
-The 2.9.1 release split all seven audit fixes into seven commits; under this
-rule it would have been four.
+## 4. Checkpoint
 
-For each item in the docs-freshness punch list, ask the user whether to update docs now (blocks the release), defer with an explicit ticket, or ship as-is. Don't silently skip.
+Present in one message: the proposed version, the changelog entries, the
+release notes, and, when docs-freshness ran, the docs list with a default
+decision per item. Ask for a single go. Apply whatever the user changes, then run every following step
+without further questions until step 8.
 
-**Also re-check what was deferred last release.** The punch list is generated from current state, so an item deferred with a ticket never reappears on its own — "defer" quietly becomes "drop". Read back the tickets raised at the previous release and ask about each again. As of 2.9.1 three are still open: the "verification failed" troubleshooting note in updating.md, a getting-started.md section describing the popup as an ordinary window (resizable, remembers its size, stays open on focus loss), and four screenshots that predate 2.9.0 (rate_limits, tray_overlay, usage_daily, usage_models). Note `scripts/docs-freshness.sh` will not surface the screenshots itself; check them by eye.
+When docs decisions were taken, update `.claude/docs-deferred.md`: add newly
+deferred items with the release they were deferred at, remove fixed or
+dropped ones. Docs fixes marked "fix now" are made in the ctfl-docs repo
+before continuing.
 
-## 2. Check for uncommitted changes
+## 5. Bump version
 
-Run `git status`. If there are uncommitted changes, run `/commit` first to commit them before proceeding.
-
-## 3. Determine version and changelogs
-
-- Read `ctfl/__init__.py` to get the current `__version__` and `__changelog__`
-- Ask the user what the new version should be (patch/minor/major bump) unless they already specified it
-- Run `git log --oneline $(git describe --tags --abbrev=0)..HEAD` to see all commits since last release
-
-### In-app changelog (`__changelog__`)
-
-This is shown in the app's About/Update dialog. **User-facing changes only:**
-- New features
-- UX changes (layout, formatting, wording)
-- Bug fixes the user would notice
-- Security fixes
-
-**Skip:** dependency bumps, refactors, test additions, tooling, internal renames, agent/skill changes.
-
-Ask the user to confirm the in-app changelog text.
-
-### GitHub release notes
-
-Cover everything from the commits since the last tag — user-facing changes,
-security hardening, developer-facing work, test coverage — grouped under
-"### Features", "### Fixes", "### Security", "### Internal".
-
-**One line per item.** State what changed and, where it is not obvious, why it
-was wrong — in a sentence, not a paragraph. The 2.8.0 notes ran to dense
-multi-sentence bullets with measured ratios and internal field names; nobody
-reads that on a release page, and the detail belongs in the commit messages
-where it already is. If a bullet needs more than about two lines, it is
-carrying explanation that should stay in the commit.
-
-Do not restate the same change in more than one section.
-
-## 4. Bump version
-
-Update the version string in ALL of these files (they must match):
-- `ctfl/__init__.py` — update `__version__` and `__changelog__`
-- `PKGBUILD` — update `pkgver`
-- `aur/PKGBUILD` — update `pkgver` (sha256sums updated later in step 11)
-
-`appimage/requirements.txt` is deliberately not in this list: `release.sh`
-overwrites it with an absolute path to the freshly-built wheel before invoking
-python-appimage, so editing it by hand achieves nothing. It is gitignored.
-
-Then verify they actually match, rather than trusting the edits. `release.sh`
-reads the version from `ctfl/__init__.py` alone, so a missed bump elsewhere
-produces mismatched artifacts silently — no step downstream would catch it:
+Update `__version__` and `__changelog__` in `ctfl/__init__.py`, `pkgver` in
+`PKGBUILD` and in `aur/PKGBUILD` (its sha256sums come in step 11). Then check
+they agree, because `release.sh` reads only `ctfl/__init__.py` and nothing
+downstream would notice a drift:
 
 ```bash
 VERSION=$(python3 -c "from ctfl import __version__; print(__version__)")
@@ -114,84 +94,69 @@ grep -q "pkgver=${VERSION}" PKGBUILD \
   || { echo "VERSION DRIFT — fix before continuing"; exit 1; }
 ```
 
-## 5. Commit the version bump
+`appimage/requirements.txt` is not on the list: `release.sh` overwrites it.
 
-Stage the three version files and commit: `release: X.Y.Z`
+Commit the three files as `release: X.Y.Z`.
 
-## 6. Build artifacts
+## 6. Build
 
-Run the release build script. fpm needs a PATH export:
 ```bash
 export PATH="$HOME/.local/share/gem/ruby/3.4.0/bin:$PATH"
 bash scripts/release.sh
 ```
 
-Verify that all expected artifacts exist in `dist/`:
-- `ctfl-X.Y.Z-py3-none-any.whl`
-- `ctfl_X.Y.Z_amd64.deb`
-- `ctfl-X.Y.Z-1.x86_64.rpm`
-- `ctfl-X.Y.Z-1-any.pkg.tar.zst`
-- `CTFL-x86_64.AppImage`
-- `SHA256SUMS` — **required**: the in-app updater (≥2.7.3) refuses to install
-  releases without it. Verify it lists the wheel and AppImage names exactly.
+Confirm `dist/` contains the wheel, the .deb, the .rpm, the .pkg.tar.zst,
+`CTFL-x86_64.AppImage`, and `SHA256SUMS` listing the wheel and AppImage by
+their exact names. The in-app updater refuses a release without SHA256SUMS.
 
-## 7. Smoke-test the built package
+## 7. Headless smoke test
 
-Install the built wheel into a throwaway venv and actually run it. Every step
-so far has checked that files exist, not that the program works — and the test
-suite does not catch what only appears at runtime. Both bugs fixed after 2.8.0 — the dropped per-model weekly bucket, and the
-popup collapsing on refresh — passed a green suite and were visible only once
-the app was actually driven.
+```bash
+bash scripts/smoke.sh dist/ctfl-X.Y.Z-py3-none-any.whl
+```
+
+It installs the wheel into a throwaway venv, imports it from outside the
+repo, checks the version, runs one real fetch with the user's config and
+prints the tooltip. Any FAIL line is a release blocker: nothing is tagged
+yet, so fix, re-commit, and restart from step 5. The suite does not catch
+what only appears at runtime; this step is the one that exercises the
+artifact.
+
+## 8. GUI look
+
+Start the built wheel with the display and let the user look:
 
 ```bash
 tmp=$(mktemp -d)
 python3 -m venv "$tmp/venv"
 "$tmp/venv/bin/pip" install --quiet dist/ctfl-X.Y.Z-py3-none-any.whl
-
-# Run from OUTSIDE the repo. From the repo root, sys.path[0] is the working
-# tree and `import ctfl` silently resolves there instead of to the wheel --
-# the smoke test then passes while never touching the artifact. Confirm the
-# path before trusting anything that follows.
-cd "$tmp"
-"$tmp/venv/bin/python" -c "import ctfl; print(ctfl.__file__, ctfl.__version__)"
-# must print a path under $tmp/venv/lib/..., and the version being released
-
-"$tmp/venv/bin/python" -m ctfl &
-smoke_pid=$!
+bash scripts/dev-run.sh stop
+(cd "$tmp" && nohup "$tmp/venv/bin/python" -m ctfl >"$tmp/log" 2>&1 &)
 ```
 
-Then, in the running app:
+Ask the user to open the popup, switch through the tabs, and hover the tray
+icon. This is the second and last stop. Afterwards run
+`bash scripts/dev-run.sh installed` to put the packaged build back and
+remove `$tmp`.
 
-- Open the popup from the tray icon and confirm the limit bars render with
-  real numbers — not "Loading...", not an error row.
-- Switch through all three tabs; confirm the window does not collapse or
-  jump.
-- Hover the tray icon and confirm the tooltip shows the same figures.
+## 9. Tag and push
 
-Kill it when done (`kill $smoke_pid; rm -rf "$tmp"`). A failure here is a
-release blocker: nothing is tagged or pushed yet, so fix, re-commit, and
-restart from step 4.
+Build first, tag second: a tag pushed before a successful build has to be
+deleted from the remote if the build fails.
 
-## 8. Tag
+```bash
+git tag vX.Y.Z
+git push && git push --tags
+```
 
-Build first, tag second. A tag pushed before a successful build has to be
-deleted from the remote if `release.sh` fails, and anything that already
-fetched it sees a version that was never released.
+## 10. GitHub release
 
-- Create a git tag: `git tag vX.Y.Z`
-
-## 9. Push
-
-- Push the commit and tag: `git push && git push --tags`
-
-## 10. Create GitHub release
-
-Use the full release notes (not the in-app changelog) as the body:
+Use the release notes, not the in-app changelog, as the body:
 
 ```bash
 gh release create vX.Y.Z \
   --title "vX.Y.Z" \
-  --notes "FULL_RELEASE_NOTES" \
+  --notes "RELEASE_NOTES" \
   dist/ctfl-X.Y.Z-py3-none-any.whl \
   dist/ctfl_X.Y.Z_amd64.deb \
   dist/ctfl-X.Y.Z-1.x86_64.rpm \
@@ -200,24 +165,19 @@ gh release create vX.Y.Z \
   dist/SHA256SUMS
 ```
 
-## 11. Update AUR package
+## 11. AUR package
 
-Now that the tag is on GitHub, update the AUR package:
-
-1. Download the source tarball to a file and compute the sha256sum. Always download to a file — do NOT pipe `curl | sha256sum` as shell hooks can corrupt piped output:
+1. Download the tarball to a file and hash it. Never pipe `curl | sha256sum`;
+   shell hooks can corrupt piped output.
    ```bash
    curl -sL https://github.com/mordup/ctfl/archive/refs/tags/vX.Y.Z.tar.gz -o /tmp/ctfl-vX.Y.Z.tar.gz
    sha256sum /tmp/ctfl-vX.Y.Z.tar.gz
    rm /tmp/ctfl-vX.Y.Z.tar.gz
    ```
-2. Update `sha256sums` in `aur/PKGBUILD` with the verified hash
-3. Regenerate `.SRCINFO`:
-   ```bash
-   cd aur && makepkg --printsrcinfo > .SRCINFO && cd ..
-   ```
-4. Commit: `chore: update AUR package to X.Y.Z`
-5. Push the commit: `git push`
-6. Push to AUR — clone the AUR repo into a temp dir, copy files, and push:
+2. Put the hash in `sha256sums` in `aur/PKGBUILD`.
+3. `cd aur && makepkg --printsrcinfo > .SRCINFO && cd ..`
+4. Commit `chore: update AUR package to X.Y.Z` and `git push`.
+5. Push to AUR:
    ```bash
    tmp=$(mktemp -d)
    git clone ssh://aur@aur.archlinux.org/ctfl.git "$tmp/ctfl-aur"
@@ -230,8 +190,8 @@ Now that the tag is on GitHub, update the AUR package:
    rm -rf "$tmp"
    ```
 
-## 12. Verify and remind
+## 12. Report
 
-- Run `gh release view vX.Y.Z` to confirm all assets are uploaded
-- Report the release URL to the user
-- Check if any user-facing features/settings/installation changed since the last docs update. If so, remind the user to update the ctfl-docs site (separate repo). Don't nag on internal-only releases.
+Run `gh release view vX.Y.Z` to confirm every asset is up. Report the release
+URL, whether the agents ran, any out-of-scope findings, and the docs items
+still deferred.

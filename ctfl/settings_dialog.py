@@ -77,6 +77,7 @@ class SettingsDialog(QDialog):
 
         instances = discover_instances()
         self._profile_combo: QComboBox | None = None
+        self._loaded_profile: str | None = None
         if len(instances) > 1:
             profile_group = QGroupBox("Profile")
             profile_layout = QFormLayout(profile_group)
@@ -239,6 +240,7 @@ class SettingsDialog(QDialog):
             if idx < 0:
                 idx = 0  # fall back to Auto-detect if pinned value is unknown
             self._profile_combo.setCurrentIndex(idx)
+            self._loaded_profile = self._profile_combo.currentData()
 
         # Trigger initial state
         self._on_source_changed(self._source_buttons.checkedId(), True)
@@ -295,8 +297,12 @@ class SettingsDialog(QDialog):
         # Update check interval
         self._config.update_check_interval = self._update_check_spin.value()
 
-        # Profile
-        if self._profile_combo is not None:
+        # Profile: the tray menu can change it while this non-modal dialog is
+        # open, so an untouched combo must not write its stale value back.
+        if (
+            self._profile_combo is not None
+            and self._profile_combo.currentData() != self._loaded_profile
+        ):
             self._config.profile = self._profile_combo.currentData()
 
         # Autostart

@@ -168,6 +168,28 @@ def test_unchanged_or_unreadable_package_keeps_the_entry(tray, monkeypatch, on_d
     assert tray.messages == []
 
 
+def test_manual_check_settling_after_disk_upgrade_keeps_the_restart_entry(tray, monkeypatch):
+    monkeypatch.setattr("ctfl.tray.installed_version", lambda: "9.0.0")
+    tray._on_update_action()
+    tray._check_installed_version()
+    tray._on_update_check_done(None)
+    tray._reset_update_action()
+    assert tray._update_action.text == "Restart to use v9.0.0"
+
+
+def test_package_reverted_on_disk_withdraws_the_restart_entry(tray, monkeypatch):
+    on_disk = {"version": "9.0.0"}
+    monkeypatch.setattr("ctfl.tray.installed_version", lambda: on_disk["version"])
+    tray._check_installed_version()
+    on_disk["version"] = __version__
+    tray._check_installed_version()
+    assert tray._installed_version is None
+    assert tray._update_action.text == "Check for Updates"
+
+    tray._on_update_check_done({"version": "9.1.0", "url": ""})
+    assert tray._update_action.text == "Update to v9.1.0"
+
+
 def test_release_found_after_disk_upgrade_is_ignored(tray, monkeypatch):
     monkeypatch.setattr("ctfl.tray.installed_version", lambda: "9.0.0")
     tray._check_installed_version()

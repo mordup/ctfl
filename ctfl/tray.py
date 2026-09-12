@@ -567,7 +567,7 @@ class TrayIcon(QSystemTrayIcon):
             QTimer.singleShot(10000, self._reset_update_action)
 
     def _reset_update_action(self) -> None:
-        if not self._pending_release:
+        if not self._pending_release and not self._installed_version:
             self._update_action.setText("Check for Updates")
             self._update_action.setEnabled(True)
 
@@ -672,7 +672,16 @@ class TrayIcon(QSystemTrayIcon):
 
     def _check_installed_version(self) -> None:
         version = installed_version()
-        if version is None or version == __version__ or version == self._installed_version:
+        if version is None or version == self._installed_version:
+            return
+        if version == __version__:
+            if self._installed_version:
+                self._installed_version = None
+                self._update_action.setText(
+                    f"Update to v{self._pending_release['version']}"
+                    if self._pending_release
+                    else "Check for Updates"
+                )
             return
         self._installed_version = version
         self._update_action.setText(f"Restart to use v{version}")

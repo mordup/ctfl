@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import sys
+from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
 
-from PyQt6.QtCore import QObject, QThread, QTimer, pyqtSignal
+from PyQt6.QtCore import QObject, Qt, QThread, QTimer, pyqtSignal
 from PyQt6.QtGui import QAction, QIcon
-from PyQt6.QtWidgets import QMenu, QSystemTrayIcon
+from PyQt6.QtWidgets import QDialog, QMenu, QSystemTrayIcon
 
 from . import __version__
 from .autostart import Autostart
@@ -117,6 +118,7 @@ class TrayIcon(QSystemTrayIcon):
         self._update_thread: QThread | None = None
         self._latest_data: UsageData | None = None
         self._pending_release: dict | None = None
+        self._dialogs: dict[str, QDialog] = {}
         self._warned_limits: set[str] = set()
 
         icon = QIcon.fromTheme(ICON_THEME_NAME)
@@ -558,7 +560,26 @@ class TrayIcon(QSystemTrayIcon):
         from PyQt6.QtGui import QDesktopServices
         QDesktopServices.openUrl(QUrl(url))
 
+    def _show_dialog(self, key: str, make: Callable[[], QDialog]) -> None:
+        # Dialogs are shown non-modal, not exec()'d: application modality
+        # would freeze the popup, which is an ordinary window now and stays
+        # on screen while these are open. QMessageBox is modal even under
+        # show(), hence the explicit reset. A second request for the same
+        # dialog raises the one already open instead of stacking another.
+        dlg = self._dialogs.get(key)
+        if dlg is None:
+            dlg = make()
+            dlg.setWindowModality(Qt.WindowModality.NonModal)
+            dlg.finished.connect(lambda: self._dialogs.pop(key, None))
+            self._dialogs[key] = dlg
+        dlg.show()
+        dlg.raise_()
+        dlg.activateWindow()
+
     def _show_update_dialog(self, release: dict) -> None:
+        self._show_dialog("update", lambda: self._make_update_dialog(release))
+
+    def _make_update_dialog(self, release: dict) -> QDialog:
         from PyQt6.QtWidgets import QMessageBox
 
         from .updater import InstallMethod, can_auto_update, detect_install_method
@@ -578,22 +599,24 @@ class TrayIcon(QSystemTrayIcon):
             )
             update_btn = dlg.addButton("Update Now", QMessageBox.ButtonRole.AcceptRole)
             download_btn = dlg.addButton("Download", QMessageBox.ButtonRole.ActionRole)
-            dlg.addButton(QMessageBox.StandardButton.Cancel)
-            dlg.exec()
-            if dlg.clickedButton() == update_btn:
-                self._apply_update(release)
-            elif dlg.clickedButton() == download_btn:
-                self._open_release_page(release["url"])
         else:
             dlg.setText(
                 f"CTFL v{version} is available (you have v{__version__}).\n\n"
                 f"Auto-update is not available for system package installs."
             )
+            update_btn = None
             download_btn = dlg.addButton("Download", QMessageBox.ButtonRole.AcceptRole)
-            dlg.addButton(QMessageBox.StandardButton.Cancel)
-            dlg.exec()
-            if dlg.clickedButton() == download_btn:
+        dlg.addButton(QMessageBox.StandardButton.Cancel)
+
+        def on_finished() -> None:
+            clicked = dlg.clickedButton()
+            if update_btn is not None and clicked is update_btn:
+                self._apply_update(release)
+            elif clicked is download_btn:
                 self._open_release_page(release["url"])
+
+        dlg.finished.connect(on_finished)
+        return dlg
 
     def _apply_update(self, release: dict) -> None:
         if self._update_thread is not None and self._update_thread.isRunning():
@@ -618,31 +641,46 @@ class TrayIcon(QSystemTrayIcon):
 
         if self._pending_release is None:
             return
+        version = self._pending_release["version"]
         if error:
-            QMessageBox.warning(None, "Update Failed", error)
-            self._update_action.setText(f"Update to v{self._pending_release['version']}")
+            self._show_dialog(
+                "update-result",
+                lambda: QMessageBox(QMessageBox.Icon.Warning, "Update Failed", error),
+            )
+            self._update_action.setText(f"Update to v{version}")
             self._update_action.setEnabled(True)
         else:
-            reply = QMessageBox.information(
-                None,
-                "Update Complete",
-                f"CTFL has been updated to v{self._pending_release['version']}.\n"
-                f"Restart now to use the new version?",
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            )
-            if reply == QMessageBox.StandardButton.Yes:
+            self._show_dialog("update-result", lambda: self._make_restart_dialog(version))
+
+    def _make_restart_dialog(self, version: str) -> QDialog:
+        from PyQt6.QtWidgets import QMessageBox
+
+        dlg = QMessageBox(
+            QMessageBox.Icon.Information,
+            "Update Complete",
+            f"CTFL has been updated to v{version}.\n"
+            f"Restart now to use the new version?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        )
+
+        def on_finished() -> None:
+            if dlg.standardButton(dlg.clickedButton()) == QMessageBox.StandardButton.Yes:
                 self._restart()
+
+        dlg.finished.connect(on_finished)
+        return dlg
 
     def _show_about(self) -> None:
         from .about_dialog import AboutDialog
-        AboutDialog(self.contextMenu()).exec()
+        self._show_dialog("about", AboutDialog)
 
     def _show_settings(self) -> None:
-        # The popup stays put: it is an ordinary window now, so hiding it
-        # around the dialog would just make it flicker.
+        self._show_dialog("settings", self._make_settings_dialog)
+
+    def _make_settings_dialog(self) -> QDialog:
         dlg = SettingsDialog(self._config, self._credentials, self._autostart)
         dlg.settings_changed.connect(self._on_settings_changed)
-        dlg.exec()
+        return dlg
 
     def _on_settings_changed(self) -> None:
         self._start_timer()

@@ -11,6 +11,7 @@ from __future__ import annotations
 import pytest
 from PyQt6.QtWidgets import QApplication, QMessageBox
 
+from ctfl import __version__
 from ctfl.about_dialog import AboutDialog
 from ctfl.tray import TrayIcon
 
@@ -36,6 +37,7 @@ class _Tray:
     _on_update_check_done = TrayIcon._on_update_check_done
     _on_update_action = TrayIcon._on_update_action
     _reset_update_action = TrayIcon._reset_update_action
+    _check_installed_version = TrayIcon._check_installed_version
 
     def __init__(self) -> None:
         self._dialogs = {}
@@ -44,6 +46,7 @@ class _Tray:
         self._installed_version = None
         self._manual_update_check = False
         self.calls: list[tuple] = []
+        self.messages: list[str] = []
 
     def _apply_update(self, release: dict) -> None:
         self.calls.append(("apply", release["version"]))
@@ -57,8 +60,8 @@ class _Tray:
     def _check_for_updates(self) -> None:
         self.calls.append(("check",))
 
-    def showMessage(self, *args) -> None:
-        pass
+    def showMessage(self, title: str, message: str, *args) -> None:
+        self.messages.append(message)
 
 
 @pytest.fixture
@@ -137,3 +140,36 @@ def test_release_found_after_install_is_ignored(tray):
     tray._on_update_check_done({"version": "9.1.0", "url": ""})
     assert tray._pending_release is None
     assert tray._update_action.text == "Check for Updates"
+
+
+def test_package_upgraded_on_disk_offers_restart(tray, monkeypatch):
+    monkeypatch.setattr("ctfl.tray.installed_version", lambda: "9.0.0")
+    tray._check_installed_version()
+    assert tray._update_action.text == "Restart to use v9.0.0"
+    assert tray.messages == ["v9.0.0 has been installed — click 'Restart to use v9.0.0' in the menu"]
+
+    tray._on_update_action()
+    assert tray.calls == [("restart",)]
+
+
+def test_package_upgraded_on_disk_notifies_once(tray, monkeypatch):
+    monkeypatch.setattr("ctfl.tray.installed_version", lambda: "9.0.0")
+    tray._check_installed_version()
+    tray._check_installed_version()
+    assert len(tray.messages) == 1
+
+
+@pytest.mark.parametrize("on_disk", [None, __version__])
+def test_unchanged_or_unreadable_package_keeps_the_entry(tray, monkeypatch, on_disk):
+    monkeypatch.setattr("ctfl.tray.installed_version", lambda: on_disk)
+    tray._check_installed_version()
+    assert tray._installed_version is None
+    assert tray._update_action.text == "Check for Updates"
+    assert tray.messages == []
+
+
+def test_release_found_after_disk_upgrade_is_ignored(tray, monkeypatch):
+    monkeypatch.setattr("ctfl.tray.installed_version", lambda: "9.0.0")
+    tray._check_installed_version()
+    tray._on_update_check_done({"version": "9.1.0", "url": ""})
+    assert tray._update_action.text == "Restart to use v9.0.0"

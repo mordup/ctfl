@@ -11,6 +11,7 @@ import hashlib
 import hmac
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -75,6 +76,26 @@ def detect_install_method(pkg_dir: Path | None = None) -> InstallMethod:
         if exe_path.is_relative_to(Path("/usr")):
             return InstallMethod.SYSTEM
     return InstallMethod.UNKNOWN
+
+
+_VERSION_RE = re.compile(r'^__version__\s*=\s*"([^"]+)"', re.MULTILINE)
+
+
+def installed_version(pkg_dir: Path | None = None) -> str | None:
+    """Version of the package files currently on disk.
+
+    Differs from the imported __version__ once a package manager has
+    replaced the files under the running process. Reads the source rather
+    than importlib.metadata, whose path caches would hide the change.
+    """
+    if pkg_dir is None:
+        pkg_dir = Path(__file__).resolve().parent
+    try:
+        text = (pkg_dir / "__init__.py").read_text()
+    except OSError:
+        return None
+    match = _VERSION_RE.search(text)
+    return match.group(1) if match else None
 
 
 def check_for_update() -> dict | None:

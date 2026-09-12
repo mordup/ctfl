@@ -26,8 +26,10 @@ from .providers.api import ApiProvider
 from .providers.local import LocalProvider
 from .providers.oauth import OAuthUsageProvider
 from .settings_dialog import SettingsDialog
+from .updater import installed_version
 
 _PROFILE_AUTO = "auto"
+_INSTALLED_VERSION_POLL_MS = 60_000
 
 _ICON_PATHS = [
     Path(f"/usr/share/icons/hicolor/scalable/apps/{ICON_THEME_NAME}.svg"),
@@ -156,6 +158,12 @@ class TrayIcon(QSystemTrayIcon):
         # Initial check after short delay
         if self._config.update_check_interval > 0:
             QTimer.singleShot(5000, self._check_for_updates)
+
+        # A package manager upgrading the files under this process leaves
+        # the old version running until it restarts.
+        self._version_timer = QTimer()
+        self._version_timer.timeout.connect(self._check_installed_version)
+        self._version_timer.start(_INSTALLED_VERSION_POLL_MS)
 
     def _build_menu(self) -> None:
         menu = QMenu()
@@ -661,6 +669,20 @@ class TrayIcon(QSystemTrayIcon):
             self._update_action.setText(f"Restart to use v{version}")
             self._show_dialog("update-restart", lambda: self._make_restart_dialog(version))
         self._update_action.setEnabled(True)
+
+    def _check_installed_version(self) -> None:
+        version = installed_version()
+        if version is None or version == __version__ or version == self._installed_version:
+            return
+        self._installed_version = version
+        self._update_action.setText(f"Restart to use v{version}")
+        self._update_action.setEnabled(True)
+        self.showMessage(
+            APP_DISPLAY_NAME,
+            f"v{version} has been installed — click 'Restart to use v{version}' in the menu",
+            QSystemTrayIcon.MessageIcon.Information,
+            5000,
+        )
 
     def _make_restart_dialog(self, version: str) -> QDialog:
         from PyQt6.QtWidgets import QMessageBox

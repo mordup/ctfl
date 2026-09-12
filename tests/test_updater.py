@@ -12,6 +12,7 @@ from ctfl.updater import (
     can_auto_update,
     check_for_update,
     detect_install_method,
+    installed_version,
 )
 
 # --- _is_newer ---
@@ -393,3 +394,24 @@ def test_parse_checksums():
     )
     sums = _parse_checksums(text)
     assert sums == {"file-one.whl": sha, "file-two.AppImage": sha}
+
+
+# --- installed_version ---
+
+def test_installed_version_reads_package_source(tmp_path):
+    (tmp_path / "__init__.py").write_text('"""doc"""\n\n__version__ = "9.0.0"\n__changelog__ = ()\n')
+    assert installed_version(tmp_path) == "9.0.0"
+
+
+def test_installed_version_missing_file(tmp_path):
+    assert installed_version(tmp_path) is None
+
+
+def test_installed_version_without_assignment(tmp_path):
+    (tmp_path / "__init__.py").write_text("x = 1\n")
+    assert installed_version(tmp_path) is None
+
+
+def test_installed_version_matches_running_package():
+    from ctfl import __version__
+    assert installed_version() == __version__

@@ -23,13 +23,13 @@ In parallel:
   touches `ctfl/popup.py`, `tray.py`, `settings_dialog.py` or
   `about_dialog.py`. Bugfix-only releases skip it; the report just lists
   `.claude/docs-deferred.md`.
-- Launch the code-auditor and quality-analyst agents only when the range
-  touches a file under `ctfl/` beyond table or string edits (pricing rows,
-  changelog entries, labels). Give each the commit range and the touched
-  files plus their direct callers, and ask for exactly that scope: security,
-  resource leaks, correctness; UX consistency, edge cases; dead code.
-  Findings outside the scope go in the release report, not into fixes.
-  When the agents are skipped, say so in the release report.
+- Launch the code-auditor agent only when the range touches a file under
+  `ctfl/` beyond table or string edits (pricing rows, changelog entries,
+  labels). Paste the output of `git diff <last-tag>..HEAD -- ctfl/` into its
+  prompt, name the direct callers of the changed functions, and ask for
+  exactly that scope: security, resource leaks, correctness, user-visible
+  behaviour, dead code. Findings outside the scope go in the release report,
+  not into fixes. When the agent is skipped, say so in the release report.
 
 An agent that returns without an explicit findings section was cut off, not
 clean. Resume it (`SendMessage` to its id) and get its results. A clean result
@@ -193,5 +193,5 @@ gh release create vX.Y.Z \
 ## 12. Report
 
 Run `gh release view vX.Y.Z` to confirm every asset is up. Report the release
-URL, whether the agents ran, any out-of-scope findings, and the docs items
+URL, whether the audit ran, any out-of-scope findings, and the docs items
 still deferred.

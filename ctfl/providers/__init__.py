@@ -75,6 +75,7 @@ class ModelTokens:
     output_tokens: int = 0
     cache_read_tokens: int = 0
     cache_creation_tokens: int = 0
+    breakdown_available: bool = True
 
     @property
     def total(self) -> int:

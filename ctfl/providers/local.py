@@ -48,7 +48,7 @@ def _resolve_project_name(project_path: Path) -> str:
     return resolved.name.capitalize()
 
 
-_MAX_CACHE_ENTRIES = 200
+_MAX_CACHE_ENTRIES = 1000
 
 # Messages whose input context (input + cache_read + cache_creation) is at or
 # above this threshold contribute their full token cost to the
@@ -80,14 +80,22 @@ class LocalProvider:
         projects_dir = instance.projects_dir
 
         cutoff_date = (datetime.now(UTC) - timedelta(days=days - 1)).strftime(DATE_FMT_ISO)
+
+        # The transcripts are the primary source for the whole window: they
+        # carry the per-category breakdown the stats cache lacks, and so are
+        # the only source a day can be priced from. The cache, which Claude
+        # Code refreshes on its own schedule, only fills days whose transcripts
+        # are gone (cleanupPeriodDays).
+        (
+            daily_map,
+            model_totals,
+            by_project,
+            daily_model_tokens,
+            long_context_tokens,
+            long_context_total,
+        ) = self._scan_jsonl_files(projects_dir, cutoff_date)
+
         cache_data = self._read_stats_cache(stats_file)
-        cache_cutoff = cache_data.get("lastComputedDate", "")
-
-        # Build daily data from cache
-        daily_map: dict[str, DailyUsage] = {}
-        model_totals: dict[str, ModelTokens] = {}
-
-        # Process cached daily activity
         activity_by_date = {
             a["date"]: a for a in cache_data.get("dailyActivity", [])
         }
@@ -97,9 +105,7 @@ class LocalProvider:
         }
 
         for date_str, activity in activity_by_date.items():
-            if date_str < cutoff_date:
-                continue
-            if date_str > cache_cutoff:
+            if date_str < cutoff_date or date_str in daily_map:
                 continue
             day = DailyUsage(
                 date=date_str,
@@ -115,41 +121,12 @@ class LocalProvider:
             day.breakdown_available = False
             daily_map[date_str] = day
 
-        # Process cached model usage for overall totals
-        for model, usage in cache_data.get("modelUsage", {}).items():
-            model_totals[model] = ModelTokens(
-                model=model,
-                input_tokens=usage.get("inputTokens", 0),
-                output_tokens=usage.get("outputTokens", 0),
-                cache_read_tokens=usage.get("cacheReadInputTokens", 0),
-                cache_creation_tokens=usage.get("cacheCreationInputTokens", 0),
-            )
-
-        # Scan JSONL files for data after cache cutoff
-        (
-            jsonl_daily,
-            jsonl_models,
-            by_project,
-            daily_model_tokens,
-            long_context_tokens,
-            long_context_total,
-        ) = self._scan_jsonl_files(projects_dir, cache_cutoff, cutoff_date)
-
-        # The cache covers days up to lastComputedDate, the JSONL scan the days
-        # after it, so the two never overlap.
-        for date_str, day in jsonl_daily.items():
-            daily_map[date_str] = day
-
-        # Merge model data: for models that appear in JSONL, add to cache totals
-        for model, tokens in jsonl_models.items():
-            if model in model_totals:
-                mt = model_totals[model]
-                mt.input_tokens += tokens.input_tokens
-                mt.output_tokens += tokens.output_tokens
-                mt.cache_read_tokens += tokens.cache_read_tokens
-                mt.cache_creation_tokens += tokens.cache_creation_tokens
-            else:
-                model_totals[model] = tokens
+            for model, total in model_tokens.items():
+                mt = model_totals.get(model)
+                if mt is None:
+                    mt = model_totals[model] = ModelTokens(model=model)
+                mt.input_tokens += total
+                mt.breakdown_available = False
 
         # Estimate costs from per-model token data when enabled
         if self._config and self._config.estimate_costs and daily_model_tokens:
@@ -186,7 +163,7 @@ class LocalProvider:
             return {}
 
     def _scan_jsonl_files(
-        self, projects_dir: Path, cache_cutoff: str, cutoff_date: str
+        self, projects_dir: Path, cutoff_date: str
     ) -> tuple[dict[str, DailyUsage], dict[str, ModelTokens], list[ProjectUsage],
                dict[str, dict[tuple[str, str], tuple[int, int, int, int, int]]], int, int]:
         daily_map: dict[str, DailyUsage] = {}
@@ -208,15 +185,13 @@ class LocalProvider:
         if not projects_dir.exists():
             return daily_map, dict(model_totals), [], {}, 0, 0
 
-        # Find all JSONL files, filter by mtime for performance
-        if cache_cutoff:
-            try:
-                cutoff_ts = datetime.strptime(cache_cutoff, DATE_FMT_ISO).replace(
-                    tzinfo=UTC
-                ).timestamp()
-            except ValueError:
-                cutoff_ts = 0
-        else:
+        # A file last written before the window opened cannot hold a record
+        # dated inside it.
+        try:
+            cutoff_ts = datetime.strptime(cutoff_date, DATE_FMT_ISO).replace(
+                tzinfo=UTC
+            ).timestamp()
+        except ValueError:
             cutoff_ts = 0
 
         jsonl_files: list[Path] = []
@@ -240,8 +215,6 @@ class LocalProvider:
             for rec in records:
                 date_str = rec["date"]
                 if date_str < cutoff_date:
-                    continue
-                if cache_cutoff and date_str <= cache_cutoff:
                     continue
 
                 # One API request appears as several assistant records, each

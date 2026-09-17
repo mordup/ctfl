@@ -232,7 +232,7 @@ class PopupWidget(QWidget):
             breakdown = _format_breakdown(
                 mt.input_tokens, mt.output_tokens,
                 mt.cache_read_tokens, mt.cache_creation_tokens,
-            ) if show_bd else None
+            ) if show_bd and mt.breakdown_available else None
             model_rows.append((label, mt.total, max_model_total, detail, breakdown))
         self._model_chart.set_rows(model_rows)
 

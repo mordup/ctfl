@@ -106,9 +106,12 @@ class LocalProvider:
             for t in cache_data.get("dailyModelTokens", [])
         }
 
-        for date_str, activity in activity_by_date.items():
+        # The two lists are written independently and do not always cover the
+        # same dates.
+        for date_str in activity_by_date.keys() | tokens_by_date.keys():
             if date_str < cutoff_date or date_str in daily_map:
                 continue
+            activity = activity_by_date.get(date_str, {})
             day = DailyUsage(
                 date=date_str,
                 message_count=activity.get("messageCount", 0),

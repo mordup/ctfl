@@ -115,3 +115,12 @@ def test_by_model_merges_cache_only_day_without_breakdown(tmp_path, monkeypatch)
     assert not by_model["claude-opus-5"].breakdown_available
     assert by_model["claude-sonnet-5"].total == 700
     assert not by_model["claude-sonnet-5"].breakdown_available
+
+
+def test_cache_day_with_tokens_but_no_activity_is_kept(tmp_path, monkeypatch):
+    cache = _cache({3: {"claude-opus-5": 5_000}})
+    cache["dailyActivity"] = []
+    provider = _setup(tmp_path, monkeypatch, [_record(1)], cache)
+    daily = {d.date: d for d in provider.fetch(days=7).daily}
+    assert daily[_date(3)].total_tokens == 5_000
+    assert daily[_date(3)].message_count == 0

@@ -16,3 +16,9 @@ def test_days_to_show_keeps_value_within_max():
     config = Config()
     config.days_to_show = 14
     assert config.days_to_show == 14
+
+
+def test_days_to_show_clamps_stored_value_below_one():
+    config = Config()
+    config.days_to_show = 0
+    assert config.days_to_show == 1

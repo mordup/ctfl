@@ -50,9 +50,8 @@ def _setup(tmp_path: Path, monkeypatch, records: list[dict], cache: dict) -> Loc
     return LocalProvider(config)
 
 
-def _cache(days: dict[int, dict[str, int]], last_computed_days_ago: int = 1) -> dict:
+def _cache(days: dict[int, dict[str, int]]) -> dict:
     return {
-        "lastComputedDate": _date(last_computed_days_ago),
         "dailyActivity": [
             {"date": _date(d), "messageCount": 99, "sessionCount": 9} for d in days
         ],

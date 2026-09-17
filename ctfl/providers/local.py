@@ -206,6 +206,10 @@ class LocalProvider:
                 except OSError:
                     continue
 
+        scanned = {str(p) for p in jsonl_files}
+        for key in [k for k in self._file_cache if k[0] not in scanned]:
+            del self._file_cache[key]
+
         for filepath in jsonl_files:
             # Determine project directory from file path
             try:

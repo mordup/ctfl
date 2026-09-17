@@ -76,7 +76,7 @@ class Config:
 
     @property
     def days_to_show(self) -> int:
-        return min(self._get("days_to_show", 7, int), MAX_DAYS_TO_SHOW)
+        return max(1, min(self._get("days_to_show", 7, int), MAX_DAYS_TO_SHOW))
 
     @days_to_show.setter
     def days_to_show(self, v: int) -> None:

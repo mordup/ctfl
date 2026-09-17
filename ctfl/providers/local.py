@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 from collections import defaultdict
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -79,7 +79,9 @@ class LocalProvider:
         stats_file = instance.stats_file
         projects_dir = instance.projects_dir
 
-        cutoff_date = (datetime.now(UTC) - timedelta(days=days - 1)).strftime(DATE_FMT_ISO)
+        # Records are bucketed by local day (see _parse_jsonl), so the window
+        # is bounded in local time too.
+        cutoff_date = (datetime.now() - timedelta(days=days - 1)).strftime(DATE_FMT_ISO)
 
         # The transcripts are the primary source for the whole window: they
         # carry the per-category breakdown the stats cache lacks, and so are
@@ -185,12 +187,10 @@ class LocalProvider:
         if not projects_dir.exists():
             return daily_map, dict(model_totals), [], {}, 0, 0
 
-        # A file last written before the window opened cannot hold a record
-        # dated inside it.
+        # A file last written before the window opened (local midnight) cannot
+        # hold a record dated inside it.
         try:
-            cutoff_ts = datetime.strptime(cutoff_date, DATE_FMT_ISO).replace(
-                tzinfo=UTC
-            ).timestamp()
+            cutoff_ts = datetime.strptime(cutoff_date, DATE_FMT_ISO).timestamp()
         except ValueError:
             cutoff_ts = 0
 

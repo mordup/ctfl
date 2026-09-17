@@ -16,13 +16,13 @@ from ctfl.providers.local import LocalProvider
 
 
 def _date(days_ago: int) -> str:
-    return (datetime.now(UTC) - timedelta(days=days_ago)).strftime("%Y-%m-%d")
+    return (datetime.now() - timedelta(days=days_ago)).strftime("%Y-%m-%d")
 
 
 def _record(days_ago: int, model: str = "claude-opus-5") -> dict:
     return {
         "type": "assistant",
-        "timestamp": f"{_date(days_ago)}T12:00:00Z",
+        "timestamp": (datetime.now(UTC) - timedelta(days=days_ago)).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "sessionId": "sess",
         "requestId": f"req-{days_ago}-{model}",
         "message": {

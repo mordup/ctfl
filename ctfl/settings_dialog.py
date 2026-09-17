@@ -20,7 +20,7 @@ from PyQt6.QtWidgets import (
 
 from .autostart import Autostart
 from .config import Config
-from .constants import COLOR_MUTED, FONT_SIZE_SMALL, ICON_THEME_NAME
+from .constants import COLOR_MUTED, FONT_SIZE_SMALL, ICON_THEME_NAME, MAX_DAYS_TO_SHOW
 from .credentials import Credentials
 
 _PROFILE_AUTO = "auto"
@@ -106,7 +106,7 @@ class SettingsDialog(QDialog):
         display_group = QGroupBox("Display")
         display_layout = QFormLayout(display_group)
         self._days_spin = QSpinBox()
-        self._days_spin.setRange(1, 90)
+        self._days_spin.setRange(1, MAX_DAYS_TO_SHOW)
         display_layout.addRow("Days to show:", self._days_spin)
         self._breakdown_check = QCheckBox("Show token breakdown")
         display_layout.addRow(self._breakdown_check)

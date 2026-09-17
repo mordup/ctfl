@@ -1,6 +1,6 @@
 from PyQt6.QtCore import QByteArray, QSettings
 
-from .constants import APP_NAME
+from .constants import APP_NAME, MAX_DAYS_TO_SHOW
 
 
 class Config:
@@ -76,7 +76,7 @@ class Config:
 
     @property
     def days_to_show(self) -> int:
-        return self._get("days_to_show", 7, int)
+        return min(self._get("days_to_show", 7, int), MAX_DAYS_TO_SHOW)
 
     @days_to_show.setter
     def days_to_show(self, v: int) -> None:

@@ -82,8 +82,8 @@ def test_dropdown_opens_on_the_saved_period(qapp):
 def test_today_shows_only_today(popup):
     popup.update_data(_data())
     assert popup._period_total_label.text() == "2.0M tokens · $8.00"
-    assert "Opus-5-5" in _texts(popup._model_chart)
-    assert "Opus-5" not in _texts(popup._model_chart)
+    assert "Opus 5.5" in _texts(popup._model_chart)
+    assert "Opus 5" not in _texts(popup._model_chart)
     assert "Docs" not in _texts(popup._project_chart)
 
 
@@ -91,7 +91,7 @@ def test_longer_period_includes_earlier_days(popup):
     popup.update_data(_data())
     _select(popup, "month" if _TODAY.day > 1 else "week")
     assert popup._period_total_label.text() == "3.0M tokens · $9.00"
-    assert {"Opus-5-5", "Opus-5"} <= set(_texts(popup._model_chart))
+    assert {"Opus 5.5", "Opus 5"} <= set(_texts(popup._model_chart))
     assert {"Ctfl", "Docs"} <= set(_texts(popup._project_chart))
 
 

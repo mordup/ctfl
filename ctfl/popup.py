@@ -658,13 +658,18 @@ def _clear_layout(layout) -> None:
 
 
 def _short_model(model: str) -> str:
-    # "claude-opus-4-6" -> "opus-4-6", "claude-opus-4-5-20251101" -> "opus-4-5"
-    name = model.removeprefix("claude-")
-    # Strip date suffix like -20251101
-    parts = name.split("-")
-    cleaned = []
-    for p in parts:
-        if len(p) == 8 and p.isdigit():
-            continue
-        cleaned.append(p)
-    return "-".join(cleaned).capitalize()
+    """'claude-opus-4-5-20251101' -> 'Opus 4.5', as Anthropic names its models.
+
+    Words form the name and numbers the version, so the older id order
+    ('claude-3-5-sonnet-20241022') reads the same way: 'Sonnet 3.5'.
+    """
+    words, version = [], []
+    for part in model.removeprefix("claude-").split("-"):
+        if not part.isdigit():
+            words.append(part)
+        elif len(part) != 8:  # 8 digits is a date suffix
+            version.append(part)
+    if not words:
+        return model
+    name = " ".join(w.capitalize() for w in words)
+    return f"{name} {'.'.join(version)}" if version else name

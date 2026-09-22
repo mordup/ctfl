@@ -17,9 +17,9 @@ from .constants import (
     APP_NAME,
     DATE_FMT_ISO,
     ICON_THEME_NAME,
-    TIME_FMT_HM,
 )
 from .credentials import Credentials
+from .dates import days_to_fetch, time_hm
 from .popup import PopupWidget
 from .providers import UsageData, UsageProvider
 from .providers.api import ApiProvider
@@ -76,20 +76,12 @@ class _FetchWorker(QObject):
                 if result.error:
                     errors.append(result.error)
                 else:
+                    # The per-day views must come from the same source as
+                    # daily, or their totals would not add up to it.
                     if not merged.daily:
                         merged.daily = result.daily
-                    if result.by_model:
-                        existing = {m.model for m in merged.by_model}
-                        for m in result.by_model:
-                            if m.model not in existing:
-                                merged.by_model.append(m)
-                                existing.add(m.model)
-                    if result.by_project:
-                        existing_projects = {p.path for p in merged.by_project}
-                        for p in result.by_project:
-                            if p.path not in existing_projects:
-                                merged.by_project.append(p)
-                                existing_projects.add(p.path)
+                        merged.models_by_day = result.models_by_day
+                        merged.projects_by_day = result.projects_by_day
                     if result.limits:
                         merged.limits.extend(result.limits)
         except Exception as e:
@@ -284,11 +276,11 @@ class TrayIcon(QSystemTrayIcon):
             if self._popup.isVisible() and self._popup.isActiveWindow():
                 self._popup.hide()
             else:
-                # Render fresh data first so the first-run sizing reflects the
+                # Render fresh data first so the popup's size reflects the
                 # current profile's content, not whatever was last shown.
                 if self._latest_data:
                     self._popup.update_data(self._latest_data)
-                self._popup.restore_or_position(self.geometry())
+                self._popup.position_near_tray(self.geometry())
                 self._popup.show()
                 # A normal window may be behind others or on another desktop;
                 # raising is what makes the tray click feel like a toggle.
@@ -311,7 +303,7 @@ class TrayIcon(QSystemTrayIcon):
             return
 
         thread = QThread()
-        worker = _FetchWorker(providers, self._config.days_to_show)
+        worker = _FetchWorker(providers, days_to_fetch(datetime.now().date()))
         worker.moveToThread(thread)
         thread.started.connect(worker.run)
         worker.finished.connect(self._on_data)
@@ -349,21 +341,17 @@ class TrayIcon(QSystemTrayIcon):
             active = resolve_profile(self._config)
             marker = " (auto)" if self._config.profile == _PROFILE_AUTO else ""
             subheader_parts.append(f"{active.name}{marker}")
+        # The sync time covers the whole tooltip, so it sits in the header.
+        if self._config.tooltip_sync:
+            synced = "synced" if subheader_parts else "Synced"
+            subheader_parts.append(f"{synced} {time_hm(datetime.now())}")
         if subheader_parts:
             lines.append(" · ".join(subheader_parts))
 
-        # Second line: today + sync time
-        sync_time = f"synced {datetime.now().strftime(TIME_FMT_HM)}" \
-            if self._config.tooltip_sync else None
-        today_line = self._tooltip_today_line(data, format_tokens, format_cost) \
-            if self._config.tooltip_today else None
-
-        if today_line and sync_time:
-            lines.append(f"{today_line} — {sync_time}")
-        elif today_line:
-            lines.append(today_line)
-        elif sync_time:
-            lines.append(sync_time.capitalize())
+        if self._config.tooltip_today:
+            today_line = self._tooltip_today_line(data, format_tokens, format_cost)
+            if today_line:
+                lines.append(today_line)
 
         # Limits
         if self._config.tooltip_limits and data.limits:
@@ -410,13 +398,12 @@ class TrayIcon(QSystemTrayIcon):
                 amounts = format_credits_range(
                     info.used_credits, info.monthly_limit, info.currency
                 )
-                spend_lines.append(
-                    f"{info.name}: {amounts} ({info.utilization:.0f}%)"
-                )
+                line = f"{info.name}: {amounts} ({info.utilization:.0f}%)"
                 reset = format_reset(info.resets_at)
                 short = reset.removeprefix("Resets in ").removeprefix("Resets ")
                 if short:
-                    spend_lines.append(f"resets {short}")
+                    line += f" | resets {short}"
+                spend_lines.append(line)
             else:
                 # Weekly limits. Skip buckets that are both unused AND
                 # lack a reset (e.g. Claude Design before first use).
@@ -444,7 +431,12 @@ class TrayIcon(QSystemTrayIcon):
                 # Attach the prediction to its own bucket: a single trailing
                 # estimate on a line listing several reads as the first one's,
                 # and per-model buckets make several the normal case.
-                part = f"{label}: {info.utilization:.0f}%"
+                # "Weekly: 11% · Fable 12%": the all-models bucket is the
+                # window's headline figure, the per-model ones follow it.
+                if label == "All models":
+                    part = f"{info.utilization:.0f}%"
+                else:
+                    part = f"{label} {info.utilization:.0f}%"
                 if pred:
                     part += f" ({pred})"
                 weekly_parts.append(part)
@@ -455,7 +447,7 @@ class TrayIcon(QSystemTrayIcon):
         result = session_lines[:]
 
         if weekly_parts:
-            line = " · ".join(weekly_parts)
+            line = "Weekly: " + " · ".join(weekly_parts)
             if weekly_reset:
                 line += f" | resets {weekly_reset}"
             result.append(line)
@@ -585,6 +577,12 @@ class TrayIcon(QSystemTrayIcon):
         dlg = self._dialogs.get(key)
         if dlg is None:
             dlg = make()
+            if self._popup.isVisible():
+                # Being transient for the popup is what makes the window
+                # manager open the dialog over it rather than mid-screen; on
+                # Wayland it is the only placement a client can influence.
+                dlg.setParent(self._popup, dlg.windowFlags())
+                dlg.finished.connect(dlg.deleteLater)
             dlg.setWindowModality(Qt.WindowModality.NonModal)
             dlg.finished.connect(lambda: self._dialogs.pop(key, None))
             self._dialogs[key] = dlg
@@ -761,11 +759,8 @@ class TrayIcon(QSystemTrayIcon):
     def _restart(self) -> None:
         self._cleanup_thread()
         self._cleanup_update_thread()
-        # Closing rather than dropping the window persists its geometry:
-        # neither hideEvent nor closeEvent fires on QApplication.quit().
-        self._popup.close()
         # startDetached races the QSettings destructor otherwise, so the
-        # replacement can read the file before the size is on disk.
+        # replacement can read the file before the last change is on disk.
         self._config.sync()
         from PyQt6.QtCore import QProcess
         from PyQt6.QtWidgets import QApplication
@@ -775,9 +770,6 @@ class TrayIcon(QSystemTrayIcon):
     def _quit(self) -> None:
         self._cleanup_thread()
         self._cleanup_update_thread()
-        # Same reason as _restart: quitting with the window open would
-        # otherwise discard the size the user chose.
-        self._popup.close()
         self._config.sync()
         from PyQt6.QtWidgets import QApplication
         QApplication.quit()

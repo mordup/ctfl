@@ -67,7 +67,7 @@ class ApiProvider:
             return UsageData(error="API: unexpected response structure")
 
         daily_map: dict[str, DailyUsage] = {}
-        by_model: dict[str, ModelTokens] = {}
+        models_by_day: dict[str, dict[str, ModelTokens]] = {}
 
         cost_by_date = {}
         for item in cost_data.get("data", []):
@@ -98,14 +98,17 @@ class ApiProvider:
                 daily_map[date] = day
 
             model = item.get("model", "unknown")
-            if model not in by_model:
-                by_model[model] = ModelTokens(model=model)
-            mt = by_model[model]
+            day_models = models_by_day.setdefault(date, {})
+            if model not in day_models:
+                day_models[model] = ModelTokens(model=model)
+            mt = day_models[model]
             mt.input_tokens += input_t
             mt.output_tokens += output_t
             mt.cache_read_tokens += cache_read
             mt.cache_creation_tokens += cache_create
 
         daily = sorted(daily_map.values(), key=lambda d: d.date, reverse=True)
-        model_list = sorted(by_model.values(), key=lambda m: m.total, reverse=True)
-        return UsageData(daily=daily, by_model=model_list)
+        return UsageData(
+            daily=daily,
+            models_by_day={day: list(models.values()) for day, models in models_by_day.items()},
+        )

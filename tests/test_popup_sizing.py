@@ -1,12 +1,14 @@
-"""Regression tests for popup sizing across a refresh.
+"""The popup sizes itself to its content and cannot be resized.
 
-Rebuilt rows are hidden until their posted show events are delivered, and
-QLayout::sizeHint() ignores hidden widgets. Measuring the tab content before
-those events land collapses the tab area to roughly the tab bar's height,
-which is what made the popup shrink on refresh while it was already open.
+Also the regression behind the refresh tests: rebuilt rows are hidden until
+their posted show events are delivered, and QLayout::sizeHint() ignores hidden
+widgets. Measuring the tab content before those events land collapses the tab
+area to roughly the tab bar's height, which made the popup shrink on refresh.
 """
 
 from __future__ import annotations
+
+from datetime import date
 
 import pytest
 from PyQt6.QtCore import QEvent, QRect, Qt
@@ -14,15 +16,7 @@ from PyQt6.QtWidgets import QApplication, QWidget
 
 from ctfl.config import Config
 from ctfl.popup import PopupWidget
-from ctfl.providers import ModelTokens, RateLimitInfo, UsageData
-
-# Enough rows that a correctly-measured tab is clearly taller than the tab bar.
-_MODELS = [
-    ModelTokens(model=f"claude-opus-{i}", input_tokens=1000 * (i + 1),
-                output_tokens=500, cache_read_tokens=2000,
-                cache_creation_tokens=100)
-    for i in range(6)
-]
+from ctfl.providers import DailyUsage, ModelTokens, RateLimitInfo, UsageData
 
 _LIMITS = [
     RateLimitInfo("Session", 18.0, "2026-08-26T12:30:00+00:00", "five_hour"),
@@ -38,28 +32,132 @@ def qapp():
     yield app
 
 
-def _data() -> UsageData:
-    return UsageData(by_model=list(_MODELS), limits=list(_LIMITS))
-
-
 @pytest.fixture
 def config():
     c = Config()
-    c.popup_geometry = None      # first-run state: the popup sizes itself
+    c.period = "today"
     return c
+
+
+def _models(rows: int) -> UsageData:
+    return UsageData(
+        models_by_day={date.today().isoformat(): [
+            ModelTokens(model=f"claude-opus-{i}", input_tokens=1000 * (i + 1),
+                        output_tokens=500, cache_read_tokens=2000,
+                        cache_creation_tokens=100)
+            for i in range(rows)]},
+        limits=list(_LIMITS),
+    )
+
+
+def _open(qapp, config, data: UsageData, tab: int = 1) -> PopupWidget:
+    w = PopupWidget(config)
+    w.update_data(data)
+    w.show()
+    w._tabs.setCurrentIndex(tab)
+    qapp.processEvents()
+    return w
 
 
 @pytest.fixture
 def popup(qapp, config):
-    w = PopupWidget(config)
-    w.update_data(_data())
-    w.show()
-    w._tabs.setCurrentIndex(1)  # By Model, the tab in the bug report
-    qapp.processEvents()
+    w = _open(qapp, config, _models(6))
     yield w
     w.close()
     w.deleteLater()
     qapp.processEvents()
+
+
+def _visible_rows(w: PopupWidget) -> list[int]:
+    """Indexes of the By Model rows that are shown whole."""
+    area = w._tabs.currentWidget()
+    shown = area.viewport().rect().translated(0, area.verticalScrollBar().value())
+    rows = w._model_chart.layout()
+    return [i for i in range(rows.count() - 1) if shown.contains(rows.itemAt(i).geometry())]
+
+
+def _cut_rows(w: PopupWidget) -> list[int]:
+    area = w._tabs.currentWidget()
+    shown = area.viewport().rect().translated(0, area.verticalScrollBar().value())
+    rows = w._model_chart.layout()
+    return [
+        i for i in range(rows.count() - 1)
+        if shown.intersects(rows.itemAt(i).geometry())
+        and not shown.contains(rows.itemAt(i).geometry())
+    ]
+
+
+# --- self-sizing -------------------------------------------------------------
+
+
+def test_popup_cannot_be_resized(popup):
+    assert popup.minimumSize() == popup.maximumSize()
+
+
+def test_width_is_fixed(popup, qapp):
+    popup.resize(1400, popup.height() + 300)
+    qapp.processEvents()
+    assert popup.width() == 500
+
+
+def test_long_list_shows_seven_whole_rows(qapp, config):
+    w = _open(qapp, config, _models(12))
+    assert _visible_rows(w) == list(range(7))
+    assert _cut_rows(w) == []
+    w.close()
+
+
+def test_short_list_fits_without_scrolling(qapp, config):
+    w = _open(qapp, config, _models(3))
+    assert _visible_rows(w) == [0, 1, 2]
+    assert not w._tabs.currentWidget().verticalScrollBar().isVisible()
+    w.close()
+
+
+def test_fewer_rows_make_a_shorter_popup(qapp, config):
+    short, tall = _open(qapp, config, _models(4)), _open(qapp, config, _models(12))
+    assert short.height() < tall.height()
+    short.close()
+    tall.close()
+
+
+@pytest.mark.parametrize("rows", [1, 2])
+def test_a_short_list_still_gets_room_for_three_rows(qapp, config, rows):
+    w, three = _open(qapp, config, _models(rows)), _open(qapp, config, _models(3))
+    assert w.height() == three.height()
+    w.close()
+    three.close()
+
+
+def test_switching_tabs_keeps_the_size(qapp, config):
+    # Usage has one row, By Model nine: sized to the tallest tab, so switching
+    # between them does not move the window's edges.
+    data = _models(9)
+    data.daily = [DailyUsage(date=date.today().isoformat(), input_tokens=10)]
+    w = _open(qapp, config, data, tab=0)
+    opened = w.size()
+    w._tabs.setCurrentIndex(1)
+    qapp.processEvents()
+    assert w.size() == opened
+    w.close()
+
+
+def test_changing_period_refits(qapp, config):
+    today = date.today()
+    data = _models(1)
+    if today.day > 1:
+        earlier = today.replace(day=1).isoformat()
+        data.models_by_day[earlier] = [ModelTokens(model=f"claude-sonnet-{i}", input_tokens=5)
+                                       for i in range(6)]
+    w = _open(qapp, config, data)
+    before = w.height()
+    w._period_combo.setCurrentIndex(w._period_combo.findData("month"))
+    qapp.processEvents()
+    assert (w.height() > before) == (today.day > 1)
+    w.close()
+
+
+# --- refresh keeps the measured size -----------------------------------------
 
 
 def test_tab_area_survives_a_refresh(popup, qapp):
@@ -69,7 +167,7 @@ def test_tab_area_survives_a_refresh(popup, qapp):
     # The tray's refresh cycle: clear, then deliver new data while visible.
     popup.show_loading()
     qapp.processEvents()
-    popup.update_data(_data())
+    popup.update_data(_models(6))
     qapp.processEvents()
 
     assert popup._tabs.height() == before
@@ -82,7 +180,7 @@ def test_tab_area_does_not_collapse_to_the_tab_bar(popup, qapp):
 
     popup.show_loading()
     qapp.processEvents()
-    popup.update_data(_data())
+    popup.update_data(_models(6))
     qapp.processEvents()
 
     assert popup._tabs.height() > tab_bar_h * 2
@@ -96,7 +194,7 @@ def test_repeated_refreshes_stay_stable(popup, qapp):
     for _ in range(4):
         popup.show_loading()
         qapp.processEvents()
-        popup.update_data(_data())
+        popup.update_data(_models(6))
         qapp.processEvents()
         heights.append(popup._tabs.height())
 
@@ -112,7 +210,7 @@ def test_content_hint_counts_rebuilt_rows(popup, qapp):
 
     popup.show_loading()
     qapp.processEvents()
-    popup.update_data(_data())
+    popup.update_data(_models(6))
 
     assert inner.layout().sizeHint().height() > 100
 
@@ -154,183 +252,24 @@ def test_losing_focus_does_not_hide_the_window(popup, qapp):
     assert still_visible
 
 
-def test_hiding_after_a_user_resize_saves_geometry(popup, config, qapp):
-    assert config.popup_geometry is None
-    popup.resize(700, 600)
-    qapp.processEvents()
-    popup.hide()
-    qapp.processEvents()
-    assert config.popup_geometry
-
-
-def test_saved_geometry_suppresses_resize_on_refresh(popup, config, qapp):
-    popup.resize(700, 600)
-    qapp.processEvents()
-    popup.hide()          # persists the user's size
-    popup.show()
-    qapp.processEvents()
-    chosen = popup.size()
-
-    popup.show_loading()
-    qapp.processEvents()
-    popup.update_data(_data())
-    qapp.processEvents()
-
-    assert popup.size() == chosen
-
-
-def test_restore_or_position_reports_whether_geometry_was_used(popup, config, qapp):
-    assert popup.restore_or_position(popup.geometry()) is False
-    popup.resize(680, 580)
-    popup.hide()
-    qapp.processEvents()
-    assert popup.restore_or_position(popup.geometry()) is True
-
-
-def test_first_run_sizes_to_the_tallest_tab(qapp, config):
-    # Daily deliberately sparse, By Model tall: the window must open big
-    # enough for the tallest tab so switching never resizes it.
-    data = UsageData(
-        by_model=[ModelTokens(model=f"claude-opus-{i}", input_tokens=1000,
-                              output_tokens=500, cache_read_tokens=200)
-                  for i in range(9)],
-        limits=list(_LIMITS),
-    )
-    w = PopupWidget(config)
-    w.update_data(data)
-    w.show()
-    qapp.processEvents()
-    opened = w.height()
-
-    w._tabs.setCurrentIndex(1)   # By Model, the tallest
-    qapp.processEvents()
-    assert w.height() == opened
-
-    w.close()
-    w.deleteLater()
-    qapp.processEvents()
-
-
-def test_tab_area_can_shrink_below_the_first_run_size(popup, qapp):
-    # setFixedHeight pins both bounds; if the minimum is not released the
-    # user cannot make the window smaller than it first opened.
-    assert popup._tabs.minimumHeight() == 0
-
-
-def test_closing_after_a_user_resize_saves_geometry(popup, config, qapp):
-    # Quit and Restart close the window rather than dropping it, because
-    # QApplication.quit() fires neither hideEvent nor closeEvent.
-    assert config.popup_geometry is None
-    popup.resize(660, 540)
-    qapp.processEvents()
-    popup.close()
-    qapp.processEvents()
-    assert config.popup_geometry
-
-
-# --- only a size the user actually chose is remembered -----------------------
-
-
-def test_never_shown_popup_does_not_save_geometry(qapp, config):
-    # TrayIcon builds the popup at startup and may never show it; tray Quit and
-    # Restart close it. Persisting Qt's default 640x480 there would freeze every
-    # later open at a size the user never picked.
-    assert config.popup_geometry is None
-    w = PopupWidget(config)
-    w.close()
-    qapp.processEvents()
-    assert config.popup_geometry is None
-    w.deleteLater()
-    qapp.processEvents()
-
-
-def test_show_then_hide_without_resizing_does_not_save(popup, config, qapp):
-    # Opening the popup and closing it again is not the user choosing a size.
-    assert config.popup_geometry is None
-    popup.hide()
-    qapp.processEvents()
-    assert config.popup_geometry is None
-
-
-def test_auto_fit_survives_an_open_close_cycle(qapp, config):
-    # Cold start: the popup opens while the fetch is still in flight, so it
-    # renders empty and small. Closing it must not freeze that size. Asserting
-    # merely that it "grew" is not enough -- layout minimums grow it anyway --
-    # so pin it to what a popup that never went through the cycle picks.
-    ref = PopupWidget(config)
-    ref.update_data(_data())
-    ref.show()
-    qapp.processEvents()
-    expected = ref.height()
-    ref.hide()
-    ref.deleteLater()
-    qapp.processEvents()
-    config.popup_geometry = None        # discard anything the reference wrote
-
-    w = PopupWidget(config)
-    w.update_data(UsageData())          # loading state: no limits, no charts
-    w.show()
-    qapp.processEvents()
-    w.hide()                            # closed without ever being resized
-    qapp.processEvents()
-
-    w.show()
-    w.update_data(_data())              # real data arrives
-    qapp.processEvents()
-    assert w.height() == expected, (
-        f"froze at {w.height()}px; a never-cycled popup picks {expected}px"
-    )
-    w.close()
-    w.deleteLater()
-    qapp.processEvents()
-
-
-def test_restored_geometry_is_clamped_to_the_screen(qapp, config):
-    # A geometry saved under one screen layout must not put the window, and its
-    # Refresh/Settings buttons, off-screen when restored under another.
-    w = PopupWidget(config)
-    w.show()
-    qapp.processEvents()
-    avail = w.screen().availableGeometry()
-    w.resize(600, 500)                          # a real user resize
-    w.move(avail.right() + 4000, avail.bottom() + 4000)
-    qapp.processEvents()
-    w.hide()
-    qapp.processEvents()
-    assert config.popup_geometry
-
-    w2 = PopupWidget(config)
-    assert w2.restore_or_position(avail) is True
-    w2.show()
-    qapp.processEvents()
-    assert avail.contains(w2.geometry()), (
-        f"restored off-screen at {w2.geometry()}, screen is {avail}"
-    )
-    w2.close()
-    w2.deleteLater()
-    qapp.processEvents()
-
-
-def test_moving_without_resizing_is_not_remembered(popup, config, qapp):
-    # A deliberate narrowing, not an oversight: window managers move windows
-    # on their own (one was seen repositioning this popup mid-refresh), and a
-    # WM move is indistinguishable from a drag. Counting moves made an
-    # ordinary refresh look like the user had chosen a size. Position still
-    # rides along in saveGeometry() as soon as a resize happens.
-    assert config.popup_geometry is None
-    popup.move(popup.x() + 120, popup.y() + 90)
-    qapp.processEvents()
-    popup.hide()
-    qapp.processEvents()
-    assert config.popup_geometry is None
+# --- settings ------------------------------------------------------------------
 
 
 def test_config_sync_flushes_for_a_replacement_process(config):
     # _restart spawns the new instance immediately; without an explicit flush
-    # the resize the user just made can still be sitting in memory.
-    config.popup_geometry = b"sentinel-geometry-blob"
+    # a setting changed just before can still be sitting in memory.
+    config.period = "month"
     config.sync()
-    assert Config().popup_geometry == b"sentinel-geometry-blob"
+    assert Config().period == "month"
+
+
+def test_settings_from_earlier_versions_are_dropped(config):
+    config._s.setValue("popup_geometry", b"old")
+    config._s.setValue("days_to_show", 7)
+    config.sync()
+    fresh = Config()
+    assert not fresh._s.contains("popup_geometry")
+    assert not fresh._s.contains("days_to_show")
 
 
 # --- tray toggle -------------------------------------------------------------
@@ -350,7 +289,7 @@ class _StubPopup:
     def raise_(self): self.calls.append("raise")
     def activateWindow(self): self.calls.append("activate")
     def update_data(self, data): self.calls.append("update")
-    def restore_or_position(self, geo): self.calls.append("position")
+    def position_near_tray(self, geo): self.calls.append("position")
 
 
 class _StubTray:

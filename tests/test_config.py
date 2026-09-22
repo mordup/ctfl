@@ -1,24 +1,26 @@
-"""A days_to_show above the transcript retention was allowed by earlier versions."""
+"""The popup's reporting period is persisted and validated."""
 
 from __future__ import annotations
 
+import pytest
+
 from ctfl.config import Config
-from ctfl.constants import MAX_DAYS_TO_SHOW
 
 
-def test_days_to_show_clamps_stored_value_above_max():
+def test_period_defaults_to_the_week():
     config = Config()
-    config.days_to_show = 90
-    assert config.days_to_show == MAX_DAYS_TO_SHOW
+    config._s.remove("period")
+    assert config.period == "week"
 
 
-def test_days_to_show_keeps_value_within_max():
+@pytest.mark.parametrize("period", ["today", "week", "month"])
+def test_period_round_trips(period):
     config = Config()
-    config.days_to_show = 14
-    assert config.days_to_show == 14
+    config.period = period
+    assert Config().period == period
 
 
-def test_days_to_show_clamps_stored_value_below_one():
+def test_unknown_stored_period_falls_back_to_the_week():
     config = Config()
-    config.days_to_show = 0
-    assert config.days_to_show == 1
+    config.period = "fortnight"
+    assert config.period == "week"

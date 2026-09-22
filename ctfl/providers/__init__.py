@@ -76,6 +76,7 @@ class ModelTokens:
     cache_read_tokens: int = 0
     cache_creation_tokens: int = 0
     breakdown_available: bool = True
+    cost_usd: float | None = None
 
     @property
     def total(self) -> int:
@@ -123,18 +124,52 @@ class ProjectUsage:
 @dataclass
 class UsageData:
     daily: list[DailyUsage] = field(default_factory=list)
-    by_model: list[ModelTokens] = field(default_factory=list)
-    by_project: list[ProjectUsage] = field(default_factory=list)
+    # Keyed by ISO date, so any period inside the fetched window can be
+    # totalled without fetching again (see models_since / projects_since).
+    models_by_day: dict[str, list[ModelTokens]] = field(default_factory=dict)
+    projects_by_day: dict[str, list[ProjectUsage]] = field(default_factory=dict)
     limits: list[RateLimitInfo] = field(default_factory=list)
-    # Sum of token cost from assistant messages where the input context
-    # (input + cache_read + cache_creation) was at or above LONG_CONTEXT_THRESHOLD.
-    # Used as the numerator of "% of tokens spent at long context".
-    long_context_tokens: int = 0
-    # Total token cost summed over the same scan window as long_context_tokens.
-    # Denominator for the ratio; kept separate from the sum of `daily` because
-    # stats-cache-era days don't contribute per-message context size.
-    long_context_total_tokens: int = 0
     error: str | None = None
+
+
+def models_since(data: UsageData, start: str) -> list[ModelTokens]:
+    """Per-model totals from start (ISO date) onwards, largest first.
+
+    A model's cost is None when any of its days is unpriced, for the same
+    reason a partial period total is withheld.
+    """
+    totals: dict[str, ModelTokens] = {}
+    for day, models in data.models_by_day.items():
+        if day < start:
+            continue
+        for m in models:
+            t = totals.get(m.model)
+            if t is None:
+                t = totals[m.model] = ModelTokens(model=m.model, cost_usd=0.0)
+            t.input_tokens += m.input_tokens
+            t.output_tokens += m.output_tokens
+            t.cache_read_tokens += m.cache_read_tokens
+            t.cache_creation_tokens += m.cache_creation_tokens
+            t.breakdown_available &= m.breakdown_available
+            if t.cost_usd is not None and m.cost_usd is not None:
+                t.cost_usd += m.cost_usd
+            else:
+                t.cost_usd = None
+    return sorted((m for m in totals.values() if m.total > 0), key=lambda m: m.total, reverse=True)
+
+
+def projects_since(data: UsageData, start: str) -> list[ProjectUsage]:
+    totals: dict[str, ProjectUsage] = {}
+    for day, projects in data.projects_by_day.items():
+        if day < start:
+            continue
+        for p in projects:
+            t = totals.get(p.path)
+            if t is None:
+                t = totals[p.path] = ProjectUsage(name=p.name, path=p.path)
+            t.total_tokens += p.total_tokens
+            t.message_count += p.message_count
+    return sorted(totals.values(), key=lambda p: p.total_tokens, reverse=True)
 
 
 class UsageProvider(Protocol):
@@ -163,13 +198,14 @@ def format_reset(resets_at: str | None) -> str:
         minutes = (total_seconds % 3600) // 60
         if hours < 24:
             return f"Resets in {hours}h{minutes:02d}m"
+        from ..dates import short_date, weekday_time
+
         local_time = reset_time.astimezone()
         # Within the next week, weekday+time is unambiguous ("Fri 02:00").
         # Beyond that, show the date so a month-away reset doesn't look
         # like one that's a few days out.
         if hours < 24 * 7:
-            from ..constants import DATETIME_FMT_WEEKDAY
-            return f"Resets {local_time.strftime(DATETIME_FMT_WEEKDAY)}"
-        return f"Resets {local_time.strftime('%-d %b')}"
+            return f"Resets {weekday_time(local_time)}"
+        return f"Resets {short_date(local_time.date())}"
     except (ValueError, TypeError):
         return ""

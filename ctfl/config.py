@@ -1,11 +1,15 @@
-from PyQt6.QtCore import QByteArray, QSettings
+from PyQt6.QtCore import QSettings
 
-from .constants import APP_NAME, MAX_DAYS_TO_SHOW
+from .constants import APP_NAME
+from .dates import PERIODS
 
 
 class Config:
     def __init__(self) -> None:
         self._s = QSettings(APP_NAME, APP_NAME)
+        # Settings earlier versions stored and nothing reads any more.
+        for key in ("popup_geometry", "days_to_show"):
+            self._s.remove(key)
 
     def sync(self) -> None:
         """Flush pending writes to disk.
@@ -28,27 +32,6 @@ class Config:
             except (ValueError, TypeError):
                 return default
         return v
-
-    @property
-    def popup_geometry(self) -> bytes | None:
-        """Saved popup window geometry, or None before the user has sized it.
-
-        Stored as the QByteArray from QWidget.saveGeometry(); its presence is
-        what tells the popup to stop auto-sizing itself and honour the user.
-        """
-        v = self._s.value("popup_geometry")
-        if isinstance(v, QByteArray):
-            return bytes(v) or None
-        if isinstance(v, (bytes, bytearray)):
-            return bytes(v) or None
-        return None
-
-    @popup_geometry.setter
-    def popup_geometry(self, v: bytes | None) -> None:
-        if v:
-            self._s.setValue("popup_geometry", QByteArray(bytes(v)))
-        else:
-            self._s.remove("popup_geometry")
 
     @property
     def data_source(self) -> str:
@@ -75,12 +58,14 @@ class Config:
         self._s.setValue("refresh_interval", v)
 
     @property
-    def days_to_show(self) -> int:
-        return max(1, min(self._get("days_to_show", 7, int), MAX_DAYS_TO_SHOW))
+    def period(self) -> str:
+        """The popup's reporting period: one of dates.PERIODS."""
+        v = self._get("period", "week")
+        return v if v in PERIODS else "week"
 
-    @days_to_show.setter
-    def days_to_show(self, v: int) -> None:
-        self._s.setValue("days_to_show", v)
+    @period.setter
+    def period(self, v: str) -> None:
+        self._s.setValue("period", v)
 
     @property
     def tooltip_today(self) -> bool:

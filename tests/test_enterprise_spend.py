@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from ctfl.providers import RateLimitInfo, format_credits, format_credits_range
@@ -395,3 +395,16 @@ def test_format_credits_range_names_an_iso_code_once():
 
 def test_format_credits_range_defaults_to_usd():
     assert format_credits_range(1987, 100000) == "$19.87 / $1,000"
+
+
+def test_tooltip_keeps_the_spend_reset_on_its_line():
+    from ctfl.providers import UsageData, format_reset
+    from ctfl.tray import TrayIcon
+
+    reset = (datetime.now(UTC) + timedelta(days=9)).isoformat()
+    data = UsageData(limits=[
+        RateLimitInfo("Monthly spend", 0.0, reset, "monthly_spend",
+                      used_credits=0, monthly_limit=6000, currency="EUR"),
+    ])
+    (line,) = TrayIcon._tooltip_limits_lines(None, data, format_reset)
+    assert line.startswith("Monthly spend: €0 / €60 (0%) | resets ")

@@ -1,18 +1,19 @@
 from __future__ import annotations
 
-from collections import deque
 from datetime import datetime as _dt
 
-from PyQt6.QtCore import QSize, Qt, pyqtSignal
+from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QFont, QFontMetrics, QIcon
 from PyQt6.QtWidgets import (
     QApplication,
+    QComboBox,
     QFrame,
     QHBoxLayout,
     QLabel,
     QProgressBar,
     QPushButton,
     QScrollArea,
+    QStackedWidget,
     QTabWidget,
     QVBoxLayout,
     QWidget,
@@ -22,12 +23,11 @@ from .config import Config
 from .constants import (
     COLOR_ACCENT,
     COLOR_MUTED,
-    DATE_FMT_DISPLAY,
     DATE_FMT_ISO,
     FONT_SIZE_SMALL,
     ICON_THEME_NAME,
-    TIME_FMT_HM,
 )
+from .dates import PERIOD_LABELS, PERIODS, day_label, period_start, time_hm
 from .providers import (
     RateLimitInfo,
     UsageData,
@@ -35,6 +35,8 @@ from .providers import (
     format_credits_range,
     format_reset,
     format_tokens,
+    models_since,
+    projects_since,
 )
 
 _PROGRESS_BAR_STYLE = (
@@ -42,29 +44,25 @@ _PROGRESS_BAR_STYLE = (
     f"QProgressBar::chunk {{ background: {COLOR_ACCENT}; border-radius: 3px; }}"
 )
 
-# Below this ratio the /compact hint is noise; suppress the whole line.
-_LONG_CONTEXT_DISPLAY_MIN_RATIO = 0.15
-
-# Maximum pixel height of the tab content area. Sized to comfortably display
-# ~7 rows (label + bar + breakdown per row). Beyond that, a scrollbar
-# appears inside the tab instead of the popup growing off-screen. Below
-# that, the area shrinks to fit — so sparse data doesn't leave a tall
-# empty panel.
-_TAB_CONTENT_MAX_HEIGHT = 380
+# The popup sizes itself and cannot be resized: a height chosen by hand
+# suits either one row or thirty, never both. The list shows up to this many
+# whole rows -- a full week -- and scrolls beyond; counted in rows, not
+# pixels, so it never ends on a cut-off row.
+_VISIBLE_ROWS = 7
+# Room for at least this many, so a single row does not leave a sliver.
+_MIN_ROWS = 3
+# Wider only stretches the rows apart; the popup widens past this only when
+# its content cannot fit, e.g. under a large system font.
+_POPUP_WIDTH = 500
 
 
 def _wrap_in_scroll(widget: QWidget) -> QScrollArea:
-    """Put a chart widget in a vertically scrollable frame capped at
-    _TAB_CONTENT_MAX_HEIGHT. Shrinks to content when smaller.
-    """
+    """Put a chart widget in a vertically scrollable frame."""
     area = QScrollArea()
     area.setWidget(widget)
     area.setWidgetResizable(True)
     area.setFrameShape(QScrollArea.Shape.NoFrame)
     area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-    # No maximum height: the tab area grows with the window the user sized.
-    # _TAB_CONTENT_MAX_HEIGHT still bounds the *initial* size (see
-    # _fit_to_content); past that the scrollbar inside the tab takes over.
     return area
 
 
@@ -77,33 +75,9 @@ class PopupWidget(QWidget):
         self._config = config
         self.setWindowTitle("Claude Usage")
         self.setWindowIcon(QIcon.fromTheme(ICON_THEME_NAME))
-        # Only a size the *user* chose may be persisted. "The window was
-        # hidden" is not that: the tray builds a popup it may never show, and
-        # opening or closing one during a cold-start fetch is not a size
-        # choice. A never-shown window is covered for free -- _user_driven()
-        # requires isVisible(), so it can never be marked.
-        self._user_sized = False
-        # Geometry changes arrive as resize/move events whatever their origin,
-        # so the two the user did not cause are flagged out: _applying covers
-        # the resizes this code makes, _settling the ones the layout makes
-        # while a freshly-shown window finds its size.
-        self._applying = False
-        # Timing alone cannot separate our resizes from the user's: under a
-        # real window manager our resize comes back as a ConfigureNotify after
-        # the _applying flag is already clear, and that echo looks like a drag.
-        # So also keep the sizes this code asked for -- an echo matches one of
-        # them, a drag does not. A short history covers the intermediate sizes
-        # a single fit passes through.
-        #
-        # Only resizes count as the user choosing a size. Moves are excluded on
-        # purpose: window managers reposition windows on their own (observed
-        # placing this one at (1706, 513) during an ordinary refresh), and
-        # there is no reliable way to tell that from a drag. The cost is that
-        # moving the window without ever resizing it is not remembered; the
-        # position still rides along in saveGeometry() once a resize happens.
-        self._expected_sizes: deque = deque(maxlen=6)
+        self._data: UsageData | None = None
         self._build_ui()
-        self.setMinimumWidth(480)
+        self._fit_to_content()
 
     def _build_ui(self) -> None:
         layout = QVBoxLayout(self)
@@ -118,21 +92,29 @@ class PopupWidget(QWidget):
         self._limits_frame.setVisible(False)
         layout.addWidget(self._limits_frame)
 
-        # Summary
-        self._summary_label = QLabel()
-        layout.addWidget(self._summary_label)
+        period_row = QHBoxLayout()
+        self._period_combo = QComboBox()
+        for key in PERIODS:
+            self._period_combo.addItem(PERIOD_LABELS[key], key)
+        self._period_combo.setCurrentIndex(self._period_combo.findData(self._config.period))
+        self._period_combo.currentIndexChanged.connect(self._on_period_changed)
+        period_row.addWidget(self._period_combo)
+        # Also carries the loading and error states.
+        self._period_total_label = QLabel()
+        self._period_total_label.setTextFormat(Qt.TextFormat.PlainText)
+        self._period_total_label.setWordWrap(True)
+        period_row.addWidget(self._period_total_label, 1)
+        layout.addLayout(period_row)
 
-        # Tabs — popup sizes to content, but each tab's content is capped at
-        # _TAB_CONTENT_MAX_HEIGHT so long lists scroll instead of overflowing
-        # the screen.
+        # Tabs — sized to content, capped at _VISIBLE_ROWS rows so long
+        # lists scroll instead of overflowing the screen.
         self._tabs = QTabWidget()
         self._daily_chart = _BarChartWidget()
         self._model_chart = _BarChartWidget()
         self._project_chart = _BarChartWidget()
-        self._tabs.addTab(_wrap_in_scroll(self._daily_chart), "Daily")
+        self._tabs.addTab(_wrap_in_scroll(self._daily_chart), "Usage")
         self._tabs.addTab(_wrap_in_scroll(self._model_chart), "By Model")
         self._tabs.addTab(_wrap_in_scroll(self._project_chart), "By Project")
-        self._tabs.currentChanged.connect(lambda _: self._fit_to_content(allow_shrink=False))
         layout.addWidget(self._tabs)
 
         # Footer
@@ -156,61 +138,48 @@ class PopupWidget(QWidget):
         self._update_limits(data.limits)
 
         if data.error:
-            # Error strings can embed raw exception text from network/JSON
-            # sources — never let QLabel auto-detect them as rich text.
-            self._summary_label.setTextFormat(Qt.TextFormat.PlainText)
-            self._summary_label.setText(f"Error: {data.error}")
-            self._daily_chart.set_rows([])
-            self._model_chart.set_rows([])
-            self._project_chart.set_rows([])
+            self._data = None
+            self._render_period()
+            # Plain text only: error strings can embed raw exception text from
+            # network/JSON sources.
+            self._period_total_label.setText(f"Error: {data.error}")
             self._update_status()
             return
 
-        # Summary
-        today = _dt.now().strftime(DATE_FMT_ISO)
-        today_data = next((d for d in data.daily if d.date == today), None)
-        total_tokens = sum(d.total_tokens for d in data.daily)
+        self._data = data
+        self._render_period()
+        self._update_status()
+        self._fit_to_content()
 
-        parts = []
-        if today_data:
-            today_text = f"Today: {format_tokens(today_data.total_tokens)} tokens"
-            if today_data.cost_usd is not None:
-                today_text += f" · {format_cost(today_data.cost_usd)}"
-            parts.append(today_text)
-        total_text = f"Period total: {format_tokens(total_tokens)} tokens"
-        total_cost = _period_cost(data.daily)
+    def _on_period_changed(self, _index: int) -> None:
+        self._config.period = self._period_combo.currentData()
+        self._render_period()
+        self._fit_to_content()
+
+    def _render_period(self) -> None:
+        data = self._data
+        if data is None:
+            self._period_total_label.setText("")
+            self._daily_chart.set_rows([])
+            self._model_chart.set_rows([])
+            self._project_chart.set_rows([])
+            return
+
+        show_bd = self._config.show_token_breakdown
+        start = period_start(self._period_combo.currentData(), _dt.now().date()).isoformat()
+        days = [d for d in data.daily if d.date >= start]
+
+        total_text = f"{format_tokens(sum(d.total_tokens for d in days))} tokens"
+        total_cost = _period_cost(days)
         if total_cost is not None:
             total_text += f" · {format_cost(total_cost)}"
-        parts.append(total_text)
+        self._period_total_label.setText(total_text)
 
-        # Long-context usage insight: the ratio is computed over the
-        # JSONL-scan window (recent sessions), not the full period —
-        # stats-cache-era days lack per-message context size. The label
-        # says "Recent sessions" to make that scope explicit to the user.
-        if data.long_context_total_tokens and data.long_context_tokens:
-            ratio = data.long_context_tokens / data.long_context_total_tokens
-            if ratio >= _LONG_CONTEXT_DISPLAY_MIN_RATIO:
-                pct = round(ratio * 100)
-                hint = (
-                    f"<span style='color: {COLOR_MUTED}; font-size: {FONT_SIZE_SMALL};'>"
-                    f"Recent sessions: {pct}% of tokens used at &gt;150k context · "
-                    f"<code>/compact</code> mid-task, <code>/clear</code> between tasks"
-                    f"</span>"
-                )
-                parts.append(hint)
-
-        html = "".join(f"<p style='margin: 2px 0;'>{p}</p>" for p in parts)
-        self._summary_label.setTextFormat(Qt.TextFormat.RichText)
-        self._summary_label.setText(html)
-
-        # Daily bar chart
-        show_bd = self._config.show_token_breakdown
-        max_day_tokens = max((d.total_tokens for d in data.daily), default=1) or 1
+        max_day_tokens = max((d.total_tokens for d in days), default=1) or 1
         daily_rows = []
-        for day in data.daily:
-            # Format date: "Mar 03" from "2026-03-03"
+        for day in days:
             try:
-                label = _dt.strptime(day.date, DATE_FMT_ISO).strftime(DATE_FMT_DISPLAY).title()
+                label = day_label(_dt.strptime(day.date, DATE_FMT_ISO).date())
             except ValueError:
                 label = day.date
             detail = f"{format_tokens(day.total_tokens)} tokens"
@@ -223,117 +192,63 @@ class PopupWidget(QWidget):
             daily_rows.append((label, day.total_tokens, max_day_tokens, detail, breakdown))
         self._daily_chart.set_rows(daily_rows)
 
-        # Model bar chart
-        max_model_total = max((m.total for m in data.by_model), default=1) or 1
+        models = models_since(data, start)
+        max_model_total = max((m.total for m in models), default=1) or 1
         model_rows = []
-        for mt in data.by_model:
-            label = _short_model(mt.model)
-            detail = format_tokens(mt.total)
+        for mt in models:
+            detail = f"{format_tokens(mt.total)} tokens"
+            if mt.cost_usd is not None:
+                detail += f" · {format_cost(mt.cost_usd)}"
             breakdown = _format_breakdown(
                 mt.input_tokens, mt.output_tokens,
                 mt.cache_read_tokens, mt.cache_creation_tokens,
             ) if show_bd and mt.breakdown_available else None
-            model_rows.append((label, mt.total, max_model_total, detail, breakdown))
+            model_rows.append((_short_model(mt.model), mt.total, max_model_total, detail, breakdown))
         self._model_chart.set_rows(model_rows)
 
-        # Project bar chart (no token breakdown available)
-        if data.by_project:
-            max_project = max(p.total_tokens for p in data.by_project) or 1
-            project_rows = []
-            for proj in data.by_project:
-                detail = format_tokens(proj.total_tokens)
-                project_rows.append((proj.name, proj.total_tokens, max_project, detail, None))
-            self._project_chart.set_rows(project_rows)
-        else:
-            self._project_chart.set_rows([])
+        # No token breakdown is available per project
+        projects = projects_since(data, start)
+        max_project = max((p.total_tokens for p in projects), default=1) or 1
+        self._project_chart.set_rows([
+            (proj.name, proj.total_tokens, max_project, format_tokens(proj.total_tokens), None)
+            for proj in projects
+        ])
 
-        self._update_status()
-        self._fit_to_content(allow_shrink=True)
-
-    def _fit_to_content(self, allow_shrink: bool = False) -> None:
-        self._applying = True
-        try:
-            self._fit_to_content_inner(allow_shrink)
-        finally:
-            self._expected_sizes.append(self.size())
-            self._applying = False
-
-    def _resize_to(self, size) -> None:
-        """Resize, remembering the size asked for so its echo is not a drag."""
-        self._expected_sizes.append(size)
-        self.resize(size)
-
-    def _fit_to_content_inner(self, allow_shrink: bool = False) -> None:
+    def _fit_to_content(self) -> None:
         # Rows rebuilt by set_rows()/_update_limits() are still hidden at this
         # point: Qt shows freshly-added children when their posted show events
         # are delivered, not when they are added. QLayout::sizeHint() skips
         # hidden widgets, so measuring now would see only margins and pin the
-        # tab area to ~46px — the popup collapsing on refresh. Deliver those
-        # events first. sendPostedEvents() rather than processEvents(), which
-        # would re-enter the event loop mid-resize; DeferredDelete is excluded
-        # by default, so the deleteLater() cleanup below is untouched.
-        #
-        # activate() alone is not enough here — it computes geometry but does
-        # not deliver show events, which is why the earlier first-open and
-        # profile-switch fixes never covered the refresh path.
+        # tab area to ~46px. Deliver those events first. sendPostedEvents()
+        # rather than processEvents(), which would re-enter the event loop
+        # mid-resize; DeferredDelete is excluded by default, so the
+        # deleteLater() cleanup is untouched.
         QApplication.sendPostedEvents()
 
-        # Once the user has sized the window, that size is authoritative --
-        # never resize under them, on refresh or otherwise.
-        if self._config.popup_geometry:
-            return
-
-        # First run only: size to the *tallest* tab rather than the current
-        # one, so switching tabs never moves the window. Layouts of hidden
-        # tabs report correct sizeHints, so all three can be measured here.
-        content_h = 0
+        # Every tab gets the height of the tallest one, so switching tabs
+        # never resizes the window. With NoFrame and no horizontal scrollbar
+        # the scroll area's height is its viewport's.
+        rows_h = max(
+            _rows_height(self._tabs.widget(i).widget().layout(), _VISIBLE_ROWS, _MIN_ROWS)
+            for i in range(self._tabs.count())
+        )
         for i in range(self._tabs.count()):
-            page = self._tabs.widget(i)
-            inner = page.widget() if isinstance(page, QScrollArea) else None
-            if inner is None:
-                continue
-            # Read the layout's sizeHint directly rather than the widget's,
-            # since the widget's sizeHint may reflect its current geometry
-            # (stretched by the scroll area) rather than its content.
-            layout = inner.layout()
-            hint = layout.sizeHint().height() if layout is not None else inner.sizeHint().height()
-            content_h = max(content_h, hint)
-        if content_h:
-            capped = min(content_h, _TAB_CONTENT_MAX_HEIGHT)
-            tab_bar_h = self._tabs.tabBar().sizeHint().height()
-            self._tabs.setFixedHeight(capped + tab_bar_h + 8)
-        # Force layout pass synchronously so sizeHint() below reflects the
-        # newly-added/removed items. invalidate() alone only marks dirty;
-        # activate() actually computes — without it, sizeHint() can return
-        # a pre-update value and the popup opens too short.
-        if self._limits_frame.layout() is not None:
-            self._limits_frame.layout().activate()
+            self._tabs.widget(i).setFixedHeight(rows_h)
+        # Hidden pages do not propagate their new size to the tab widget's
+        # page stack, so its cached size hint must be dropped by hand.
+        self._tabs.findChild(QStackedWidget).layout().invalidate()
+        self._tabs.updateGeometry()
+
+        # activate() computes geometry synchronously; invalidate() alone only
+        # marks it dirty, and sizeHint() would return the pre-update value.
+        self._limits_frame.layout().activate()
         self._limits_frame.updateGeometry()
-        if self.layout() is not None:
-            self.layout().invalidate()
-            self.layout().activate()
-        self.updateGeometry()
-        if self.isVisible():
-            if allow_shrink:
-                # New data arrived — resize unconditionally so the window
-                # doesn't stay stuck at a larger stale size.
-                self._resize_to(self.sizeHint())
-            else:
-                # Tab-switch path: only grow, to avoid yanking the window
-                # out from under the user's cursor.
-                current = self.size()
-                ideal = self.sizeHint()
-                if ideal.height() > current.height() or ideal.width() > current.width():
-                    self._resize_to(QSize(max(current.width(), ideal.width()),
-                                          max(current.height(), ideal.height())))
-        else:
-            self.adjustSize()
-            self._expected_sizes.append(self.size())
-        # setFixedHeight above pinned both bounds. Release them so the tab
-        # area can follow the window the user resizes -- leaving the minimum
-        # in place would stop them shrinking below the first-run size.
-        self._tabs.setMinimumHeight(0)
-        self._tabs.setMaximumHeight(16777215)
+        self.layout().invalidate()
+        self.layout().activate()
+        self.setFixedSize(
+            max(_POPUP_WIDTH, self.layout().minimumSize().width()),
+            self.layout().sizeHint().height(),
+        )
 
     def _update_limits(self, limits: list[RateLimitInfo]) -> None:
         # Clear previous widgets. setParent(None) detaches them from the
@@ -508,12 +423,11 @@ class PopupWidget(QWidget):
 
     def _update_status(self) -> None:
         self._status_label.setText(
-            f"Last updated: {_dt.now().strftime(TIME_FMT_HM)}"
+            f"Last updated: {time_hm(_dt.now())}"
         )
 
     def show_loading(self) -> None:
-        self._summary_label.setTextFormat(Qt.TextFormat.PlainText)
-        self._summary_label.setText("Loading...")
+        self._period_total_label.setText("Loading...")
         self._refresh_btn.setEnabled(False)
         self._refresh_btn.setText("Loading...")
         # Clear the previous profile's limit bars so they don't stay
@@ -539,55 +453,6 @@ class PopupWidget(QWidget):
         y = max(screen_rect.top(), min(y, screen_rect.bottom() - size.height()))
 
         self.move(x, y)
-
-    def _user_driven(self) -> bool:
-        return self.isVisible() and not self._applying
-
-    def resizeEvent(self, event) -> None:
-        if self._user_driven() and event.size() not in self._expected_sizes:
-            self._user_sized = True
-        super().resizeEvent(event)
-
-
-    def restore_or_position(self, tray_geometry) -> bool:
-        """Restore the user's saved geometry, or fall back to the tray corner.
-
-        Returns True when a saved geometry was applied, which also means the
-        popup must not resize itself afterwards.
-        """
-        saved = self._config.popup_geometry
-        if saved and self.restoreGeometry(saved):
-            # restoreGeometry() re-fits an off-screen rect onto the current
-            # screen itself (verified on both the offscreen and xcb platforms),
-            # so no extra clamp is needed on this path.
-            self._user_sized = True   # it is the user's size, by definition
-            self._expected_sizes.append(self.size())
-            return True
-        self._applying = True
-        try:
-            self.position_near_tray(tray_geometry)
-        finally:
-            self._applying = False
-        return False
-
-    def _save_geometry(self) -> None:
-        # Minimised windows report their restored-from geometry inconsistently
-        # across platforms; skip rather than persist something unusable.
-        if self.isMinimized():
-            return
-        if not self._user_sized:
-            # Shown and closed again without the user touching the frame, so
-            # saving would switch auto-fit off on their behalf.
-            return
-        self._config.popup_geometry = bytes(self.saveGeometry())
-
-    def closeEvent(self, event) -> None:
-        self._save_geometry()
-        super().closeEvent(event)
-
-    def hideEvent(self, event) -> None:
-        self._save_geometry()
-        super().hideEvent(event)
 
 
 class _BarChartWidget(QWidget):
@@ -730,6 +595,27 @@ def _period_cost(daily: list) -> float | None:
     if not daily or any(d.cost_usd is None for d in daily):
         return None
     return sum(d.cost_usd for d in daily)
+
+
+def _rows_height(layout, rows: int, at_least: int = 0) -> int:
+    """Height of a chart's first `rows` rows; fewer when it has fewer, but
+    never less than `at_least` rows of its tallest one."""
+    # The chart's last item is its trailing stretch, not a row. The widget's
+    # own sizeHint, not the item's: the item reports a row as 0px while the
+    # popup has not been shown yet.
+    heights = [
+        layout.itemAt(i).widget().sizeHint().height()
+        for i in range(min(rows, layout.count() - 1))
+    ]
+    if not heights:
+        return 0
+    heights += [max(heights)] * (at_least - len(heights))
+    margins = layout.contentsMargins()
+    return (
+        sum(heights)
+        + layout.spacing() * (len(heights) - 1)
+        + margins.top() + margins.bottom()
+    )
 
 
 def _clear_layout(layout) -> None:

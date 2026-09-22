@@ -9,7 +9,8 @@ enough.
 from __future__ import annotations
 
 import pytest
-from PyQt6.QtWidgets import QApplication, QMessageBox
+from PyQt6.QtCore import Qt
+from PyQt6.QtWidgets import QApplication, QMessageBox, QWidget
 
 from ctfl import __version__
 from ctfl.about_dialog import AboutDialog
@@ -41,6 +42,7 @@ class _Tray:
 
     def __init__(self) -> None:
         self._dialogs = {}
+        self._popup = QWidget(None, Qt.WindowType.Window)
         self._update_action = _Action()
         self._pending_release = None
         self._installed_version = None
@@ -86,6 +88,19 @@ def test_second_request_raises_the_open_dialog(tray):
     tray._show_dialog("about", AboutDialog)
     assert tray._dialogs["about"] is first
     assert first.isVisible()
+
+
+def test_dialog_opened_from_the_popup_is_transient_for_it(tray):
+    tray._popup.show()
+    tray._show_dialog("about", AboutDialog)
+    dlg = tray._dialogs["about"]
+    assert dlg.windowHandle().transientParent() is tray._popup.windowHandle()
+    assert dlg.isWindow()
+
+
+def test_dialog_opened_without_the_popup_has_no_parent(tray):
+    tray._show_dialog("about", AboutDialog)
+    assert tray._dialogs["about"].parent() is None
 
 
 def test_closed_dialog_leaves_the_registry(tray, app):

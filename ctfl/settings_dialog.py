@@ -20,7 +20,7 @@ from PyQt6.QtWidgets import (
 
 from .autostart import Autostart
 from .config import Config
-from .constants import COLOR_MUTED, FONT_SIZE_SMALL, ICON_THEME_NAME, MAX_DAYS_TO_SHOW
+from .constants import COLOR_MUTED, FONT_SIZE_SMALL, ICON_THEME_NAME
 from .credentials import Credentials
 
 _PROFILE_AUTO = "auto"
@@ -105,9 +105,6 @@ class SettingsDialog(QDialog):
         # Display
         display_group = QGroupBox("Display")
         display_layout = QFormLayout(display_group)
-        self._days_spin = QSpinBox()
-        self._days_spin.setRange(1, MAX_DAYS_TO_SHOW)
-        display_layout.addRow("Days to show:", self._days_spin)
         self._breakdown_check = QCheckBox("Show token breakdown")
         display_layout.addRow(self._breakdown_check)
         self._estimate_costs_check = QCheckBox("Estimate costs from local data")
@@ -219,7 +216,6 @@ class SettingsDialog(QDialog):
         if existing_cf:
             self._cf_clearance_input.setText(existing_cf)
 
-        self._days_spin.setValue(self._config.days_to_show)
         self._breakdown_check.setChecked(self._config.show_token_breakdown)
         self._estimate_costs_check.setChecked(self._config.estimate_costs)
         self._auto_refresh_check.setChecked(self._config.auto_refresh)
@@ -254,7 +250,6 @@ class SettingsDialog(QDialog):
         self._config.estimate_costs = self._estimate_costs_check.isChecked()
         self._config.auto_refresh = self._auto_refresh_check.isChecked()
         self._config.refresh_interval = self._refresh_spin.value() * 60
-        self._config.days_to_show = self._days_spin.value()
 
         # Tooltip
         self._config.tooltip_today = self._tooltip_today.isChecked()

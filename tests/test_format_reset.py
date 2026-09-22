@@ -50,3 +50,15 @@ def test_far_future_uses_date():
 
 def test_invalid_format():
     assert _format_reset("not-a-date") == ""
+
+
+def test_weekday_is_english_whatever_lc_time(monkeypatch):
+    from PyQt6.QtCore import QLocale
+
+    from ctfl import dates
+
+    monkeypatch.setattr(dates, "_conventions", lambda: QLocale("fr_FR"))
+    future = (datetime.now(UTC) + timedelta(days=2)).isoformat()
+    weekday, clock = _format_reset(future).removeprefix("Resets ").split(" ")
+    assert weekday in ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
+    assert len(clock) == 5  # 24-hour HH:MM, as LC_TIME=fr_FR asks

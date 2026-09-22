@@ -132,17 +132,6 @@ def test_dedup_applies_to_cost_estimate(tmp_path, monkeypatch):
     assert data.daily[0].cost_usd == 5.00
 
 
-def test_dedup_applies_to_long_context_metric(tmp_path, monkeypatch):
-    day_records = [
-        _assistant(request_id="req_1", input_tokens=200_000, output_tokens=0),
-        _assistant(request_id="req_1", input_tokens=200_000, output_tokens=0),
-    ]
-    _write_jsonl(tmp_path / "projects" / "proj" / "sess.jsonl", day_records)
-    _pin(monkeypatch, tmp_path)
-    data = LocalProvider().fetch(days=30)
-    assert data.long_context_total_tokens == 200_000
-
-
 def test_parse_jsonl_emits_request_id(tmp_path):
     path = tmp_path / "s.jsonl"
     _write_jsonl(path, [_assistant(request_id="req_1", message_id="msg_1")])

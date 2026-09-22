@@ -50,14 +50,6 @@ def _resolve_project_name(project_path: Path) -> str:
 
 _MAX_CACHE_ENTRIES = 1000
 
-# Messages whose input context (input + cache_read + cache_creation) is at or
-# above this threshold contribute their full token cost to the
-# long_context_tokens metric. 150k is used by Claude Code's /stats dialog and
-# corresponds to ~75% of the 200k context window — past this point, /compact
-# or /clear noticeably reduce burn.
-LONG_CONTEXT_THRESHOLD = 150_000
-
-
 class LocalProvider:
     def __init__(self, config: Config | None = None) -> None:
         # Cache parsed JSONL keyed by (filepath, mtime) -> list of parsed records
@@ -90,11 +82,9 @@ class LocalProvider:
         # are gone (cleanupPeriodDays).
         (
             daily_map,
-            model_totals,
-            by_project,
+            models_by_day,
+            projects_by_day,
             daily_model_tokens,
-            long_context_tokens,
-            long_context_total,
         ) = self._scan_jsonl_files(projects_dir, cutoff_date)
 
         cache_data = self._read_stats_cache(stats_file)
@@ -125,13 +115,10 @@ class LocalProvider:
             day.input_tokens = sum(model_tokens.values())
             day.breakdown_available = False
             daily_map[date_str] = day
-
-            for model, total in model_tokens.items():
-                mt = model_totals.get(model)
-                if mt is None:
-                    mt = model_totals[model] = ModelTokens(model=model)
-                mt.input_tokens += total
-                mt.breakdown_available = False
+            models_by_day[date_str] = [
+                ModelTokens(model=model, input_tokens=total, breakdown_available=False)
+                for model, total in model_tokens.items()
+            ]
 
         # Estimate costs from per-model token data when enabled
         if self._config and self._config.estimate_costs and daily_model_tokens:
@@ -141,21 +128,19 @@ class LocalProvider:
                     cost = estimate_daily_cost(model_map, date=date_str)
                     if cost is not None:
                         daily_map[date_str].cost_usd = cost
+                for mt in models_by_day.get(date_str, []):
+                    mt.cost_usd = estimate_daily_cost(
+                        {key: tokens for key, tokens in model_map.items() if key[0] == mt.model},
+                        date=date_str,
+                    )
 
         # Sort daily by date descending, filter to requested range
         daily_list = sorted(daily_map.values(), key=lambda d: d.date, reverse=True)
-        model_list = sorted(
-            (m for m in model_totals.values() if m.total > 0),
-            key=lambda m: m.total,
-            reverse=True,
-        )
 
         return UsageData(
             daily=daily_list,
-            by_model=model_list,
-            by_project=by_project,
-            long_context_tokens=long_context_tokens,
-            long_context_total_tokens=long_context_total,
+            models_by_day=models_by_day,
+            projects_by_day=projects_by_day,
         )
 
     def _read_stats_cache(self, stats_file: Path) -> dict:
@@ -169,26 +154,26 @@ class LocalProvider:
 
     def _scan_jsonl_files(
         self, projects_dir: Path, cutoff_date: str
-    ) -> tuple[dict[str, DailyUsage], dict[str, ModelTokens], list[ProjectUsage],
-               dict[str, dict[tuple[str, str], tuple[int, int, int, int, int]]], int, int]:
+    ) -> tuple[dict[str, DailyUsage], dict[str, list[ModelTokens]],
+               dict[str, list[ProjectUsage]],
+               dict[str, dict[tuple[str, str], tuple[int, int, int, int, int]]]]:
         daily_map: dict[str, DailyUsage] = {}
-        model_totals: dict[str, ModelTokens] = defaultdict(
-            lambda: ModelTokens(model="")
-        )
+        model_agg: dict[str, dict[str, ModelTokens]] = defaultdict(dict)
         session_dates: dict[str, set[str]] = defaultdict(set)
-        project_agg: dict[str, dict] = {}  # project_dir -> {tokens, messages}
+        # date -> project_dir -> [tokens, messages]
+        project_agg: dict[str, dict[str, list[int]]] = defaultdict(
+            lambda: defaultdict(lambda: [0, 0])
+        )
         # Per-day per-model token breakdown for cost estimation
         daily_model_tokens: dict[str, dict[tuple[str, str], list[int]]] = defaultdict(
             lambda: defaultdict(lambda: [0, 0, 0, 0, 0])
         )
-        long_context_tokens = 0
-        long_context_total = 0
         # Spans the whole scan, not just one file, so a request logged in more
         # than one place is still counted once.
         seen_requests: set[str] = set()
 
         if not projects_dir.exists():
-            return daily_map, dict(model_totals), [], {}, 0, 0
+            return daily_map, {}, {}, {}
 
         # A file last written before the window opened (local midnight) cannot
         # hold a record dated inside it.
@@ -235,12 +220,6 @@ class LocalProvider:
 
                 model = rec["model"]
                 rec_tokens = rec["input_tokens"] + rec["output_tokens"] + rec["cache_read"] + rec["cache_creation"]
-                # Context size = the full prompt sent to the model (input +
-                # all cached portions). Output is not part of the context.
-                context_size = rec["input_tokens"] + rec["cache_read"] + rec["cache_creation"]
-                long_context_total += rec_tokens
-                if context_size >= LONG_CONTEXT_THRESHOLD:
-                    long_context_tokens += rec_tokens
 
                 if date_str not in daily_map:
                     daily_map[date_str] = DailyUsage(date=date_str)
@@ -255,8 +234,9 @@ class LocalProvider:
                 if session_id:
                     session_dates[date_str].add(session_id)
 
-                mt = model_totals[model]
-                mt.model = model
+                mt = model_agg[date_str].get(model)
+                if mt is None:
+                    mt = model_agg[date_str][model] = ModelTokens(model=model)
                 mt.input_tokens += rec["input_tokens"]
                 mt.output_tokens += rec["output_tokens"]
                 mt.cache_read_tokens += rec["cache_read"]
@@ -276,33 +256,35 @@ class LocalProvider:
 
                 # Aggregate per-project
                 if project_dir:
-                    if project_dir not in project_agg:
-                        project_agg[project_dir] = {"tokens": 0, "messages": 0}
-                    project_agg[project_dir]["tokens"] += rec_tokens
-                    project_agg[project_dir]["messages"] += 1
+                    agg = project_agg[date_str][project_dir]
+                    agg[0] += rec_tokens
+                    agg[1] += 1
 
         for date_str, sessions in session_dates.items():
             if date_str in daily_map:
                 daily_map[date_str].session_count = len(sessions)
 
-        # Build project usage list
-        projects = []
-        for project_dir, agg in project_agg.items():
-            name = _resolve_project_name(projects_dir / project_dir)
-            projects.append(ProjectUsage(
-                name=name,
-                path=project_dir,
-                total_tokens=agg["tokens"],
-                message_count=agg["messages"],
-            ))
-        projects.sort(key=lambda p: p.total_tokens, reverse=True)
+        names: dict[str, str] = {}
+        projects_by_day: dict[str, list[ProjectUsage]] = {}
+        for date_str, per_project in project_agg.items():
+            projects_by_day[date_str] = []
+            for project_dir, (tokens, messages) in per_project.items():
+                if project_dir not in names:
+                    names[project_dir] = _resolve_project_name(projects_dir / project_dir)
+                projects_by_day[date_str].append(ProjectUsage(
+                    name=names[project_dir],
+                    path=project_dir,
+                    total_tokens=tokens,
+                    message_count=messages,
+                ))
+        models_by_day = {day: list(models.values()) for day, models in model_agg.items()}
 
         # Convert daily_model_tokens lists to tuples
         dmt_out: dict[str, dict[tuple[str, str], tuple[int, int, int, int, int]]] = {
             date: {m: tuple(v) for m, v in models.items()}  # type: ignore[misc]
             for date, models in daily_model_tokens.items()
         }
-        return daily_map, dict(model_totals), projects, dmt_out, long_context_tokens, long_context_total
+        return daily_map, models_by_day, projects_by_day, dmt_out
 
     def _parse_jsonl(self, filepath: Path) -> list[dict]:
         try:

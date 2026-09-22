@@ -10,7 +10,8 @@ from __future__ import annotations
 # The two cache-write rates are separate products, not a single "cache creation"
 # price: a 5-minute-TTL write costs 1.25x input, a 1-hour-TTL write costs 2x.
 # Claude Code uses both, so the JSONL breakdown decides which applies.
-# cache_read is 0.1x input for every model except Fable/Mythos 5.1 (0.025x).
+# cache_read is 0.1x input for every model except Fable/Mythos 5.1 (0.025x)
+# and Opus 5.5 (0.05x).
 #
 # Every id is enumerated and matched exactly after normalisation — not by
 # prefix. Prefix matching would hand a future claude-opus-4-9 the legacy
@@ -25,6 +26,7 @@ _PRICING: dict[str, tuple[float, float, float, float, float]] = {
     "fable-5":    (10.00, 50.00, 1.00, 12.50, 20.00),
     "mythos-5":   (10.00, 50.00, 1.00, 12.50, 20.00),
     # Current Opus tier
+    "opus-5-5":   ( 4.00, 20.00, 0.20,  5.00,  8.00),
     "opus-5":     ( 5.00, 25.00, 0.50,  6.25, 10.00),
     "opus-4-8":   ( 5.00, 25.00, 0.50,  6.25, 10.00),
     "opus-4-7":   ( 5.00, 25.00, 0.50,  6.25, 10.00),
@@ -43,11 +45,12 @@ _PRICING: dict[str, tuple[float, float, float, float, float]] = {
     "haiku-4-5":  ( 1.00,  5.00, 0.10,  1.25,  2.00),
 }
 
-# Fast mode (research preview) bills Opus 5 and Opus 4.8 at a premium across the
+# Fast mode (research preview) bills Opus 5.5, Opus 5 and Opus 4.8 at 2x across the
 # whole context window; caching multipliers stack on top of it. Opus 4.7 rejects
 # speed="fast" outright and Opus 4.6 silently runs at standard rates, so any
 # other model asking for fast mode falls back to its standard entry.
 _FAST_PRICING: dict[str, tuple[float, float, float, float, float]] = {
+    "opus-5-5": ( 8.00, 40.00, 0.40, 10.00, 16.00),
     "opus-5":   (10.00, 50.00, 1.00, 12.50, 20.00),
     "opus-4-8": (10.00, 50.00, 1.00, 12.50, 20.00),
 }

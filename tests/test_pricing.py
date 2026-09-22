@@ -1,6 +1,9 @@
+import pytest
+
 from ctfl.providers import pricing
 from ctfl.providers.pricing import _match_pricing, _normalize, estimate_daily_cost
 
+_OPUS_5_5 = (4.00, 20.00, 0.20, 5.00, 8.00)
 _OPUS_CURRENT = (5.00, 25.00, 0.50, 6.25, 10.00)
 _OPUS_LEGACY = (15.00, 75.00, 1.50, 18.75, 30.00)
 _SONNET = (3.00, 15.00, 0.30, 3.75, 6.00)
@@ -31,6 +34,16 @@ def test_opus_5():
 
 def test_opus_5_long_context_variant():
     assert _match_pricing("claude-opus-5[1m]") == _OPUS_CURRENT
+
+
+@pytest.mark.parametrize("model", ["claude-opus-5-5", "claude-opus-5-5[1m]"])
+def test_opus_5_5(model):
+    assert _match_pricing(model) == _OPUS_5_5
+
+
+def test_opus_5_5_day_is_priced():
+    cost = estimate_daily_cost({("claude-opus-5-5[1m]", "standard"): (1_000_000, 1_000_000, 0, 0, 0)})
+    assert cost == pytest.approx(24.00)
 
 
 def test_sonnet_5():
@@ -210,9 +223,10 @@ def test_fast_mode_opus_4_8():
     assert _match_pricing("claude-opus-4-8", speed="fast") == _OPUS_FAST
 
 
-def test_fast_mode_is_double_standard_for_opus_5():
-    std = _match_pricing("claude-opus-5")
-    fast = _match_pricing("claude-opus-5", speed="fast")
+@pytest.mark.parametrize("model", ["claude-opus-5", "claude-opus-5-5"])
+def test_fast_mode_is_double_standard(model):
+    std = _match_pricing(model)
+    fast = _match_pricing(model, speed="fast")
     assert all(f == s * 2 for f, s in zip(fast, std, strict=True))
 
 

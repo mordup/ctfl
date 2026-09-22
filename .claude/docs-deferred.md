@@ -9,20 +9,16 @@ cannot surface any of these on its own.
   verification failed" dialog. It means the release failed the SHA256SUMS
   check, not that the user's machine is at fault; wait for a corrected
   release or update via the package manager. Not a full section. Deferred
-  at 2.7.3 (2026-06-09), 2.9.0, 2.9.1, 2.10.0, 2.11.0.
-- `docs/getting-started.md`: a section on the popup being an ordinary window
-  since 2.9.0: resizable, remembers the size you chose, stays open when you
-  click another application. Deferred at 2.9.0 (2026-08-26), 2.9.1, 2.10.0, 2.11.0.
-- Screenshots that predate 2.9.0 and contradict it: `rate_limits.png` (no
-  Fable bar, no monthly-spend row on a Max plan), `tray_overlay.png`,
-  `usage_daily.png`, `usage_models.png` (old Tool-style popup). Note
-  `rate_limits.png` and `tray_enterprise.png` exist only in the docs repo,
-  so the freshness script never examines them. Deferred at 2.9.0, 2.9.1, 2.10.0, 2.11.0.
+  at 2.7.3 (2026-06-09), 2.9.0, 2.9.1, 2.10.0, 2.11.0, 2.12.0.
+- Screenshots `tray_alert.png` (the notification now reads "Session at N%",
+  not "Current session at N%") and `tray_enterprise.png` (old tooltip
+  layout: sync time on the Today line, spend reset on its own line). The
+  latter exists only in the docs repo, so the freshness script never
+  examines it. Deferred at 2.12.0 (2026-09-23).
 - `docs/configuration.md`: the "Estimate costs from local data" toggle is
   disabled while the data source is Admin API, since 2.9.1. Deferred at
-  2.10.0 (2026-09-12), 2.11.0.
-- `docs/getting-started.md`: the context-menu list omits Restart, Profile
-  and About. Deferred at 2.10.0 (2026-09-12), 2.11.0.
+  2.10.0 (2026-09-12), 2.11.0, 2.12.0.
 - `docs/data-sources.md`: a note that CTFL counts each API request once,
   so its totals are roughly half of what Claude Code's `/stats` reports,
-  which sums one entry per content block. Deferred at 2.11.0 (2026-09-17).
+  which sums one entry per content block. Deferred at 2.11.0 (2026-09-17),
+  2.12.0.

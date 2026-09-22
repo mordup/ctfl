@@ -45,10 +45,6 @@ def short_date(d: date) -> str:
     return _NAMES.toString(QDate(d.year, d.month, d.day), "MMM d" if _month_first() else "d MMM")
 
 
-def month_name(month: int) -> str:
-    return _NAMES.monthName(month)
-
-
 def time_hm(dt: datetime) -> str:
     return _NAMES.toString(_qdatetime(dt), _time_pattern())
 

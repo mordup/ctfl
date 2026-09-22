@@ -39,10 +39,6 @@ def test_time_hm(lc_time):
     assert dates.time_hm(datetime(2026, 9, 25, 9, 5)) == _pick(lc_time, "09:05", "9:05\u202fAM")
 
 
-def test_month_name_is_english(lc_time):
-    assert dates.month_name(9) == "September"
-
-
 def test_week_starts_on_the_locale_first_day(lc_time):
     assert dates.week_start(_TUESDAY) == _pick(lc_time, date(2026, 9, 21), date(2026, 9, 20))
 

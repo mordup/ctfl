@@ -76,6 +76,9 @@ class PopupWidget(QWidget):
         self.setWindowTitle("Claude Usage")
         self.setWindowIcon(QIcon.fromTheme(ICON_THEME_NAME))
         self._data: UsageData | None = None
+        # "Loading..." or an error, shown in place of the period total until
+        # the next data arrives, whatever the period.
+        self._status_text: str | None = None
         self._build_ui()
         self._fit_to_content()
 
@@ -139,14 +142,16 @@ class PopupWidget(QWidget):
 
         if data.error:
             self._data = None
-            self._render_period()
             # Plain text only: error strings can embed raw exception text from
             # network/JSON sources.
-            self._period_total_label.setText(f"Error: {data.error}")
+            self._status_text = f"Error: {data.error}"
+            self._render_period()
             self._update_status()
+            self._fit_to_content()
             return
 
         self._data = data
+        self._status_text = None
         self._render_period()
         self._update_status()
         self._fit_to_content()
@@ -159,7 +164,7 @@ class PopupWidget(QWidget):
     def _render_period(self) -> None:
         data = self._data
         if data is None:
-            self._period_total_label.setText("")
+            self._period_total_label.setText(self._status_text or "")
             self._daily_chart.set_rows([])
             self._model_chart.set_rows([])
             self._project_chart.set_rows([])
@@ -173,7 +178,7 @@ class PopupWidget(QWidget):
         total_cost = _period_cost(days)
         if total_cost is not None:
             total_text += f" · {format_cost(total_cost)}"
-        self._period_total_label.setText(total_text)
+        self._period_total_label.setText(self._status_text or total_text)
 
         max_day_tokens = max((d.total_tokens for d in days), default=1) or 1
         daily_rows = []
@@ -427,7 +432,8 @@ class PopupWidget(QWidget):
         )
 
     def show_loading(self) -> None:
-        self._period_total_label.setText("Loading...")
+        self._status_text = "Loading..."
+        self._period_total_label.setText(self._status_text)
         self._refresh_btn.setEnabled(False)
         self._refresh_btn.setText("Loading...")
         # Clear the previous profile's limit bars so they don't stay
@@ -508,10 +514,7 @@ class _BarChartWidget(QWidget):
             # Top line: label ... detail
             top = QHBoxLayout()
             top.setSpacing(8)
-            label = QLabel(label_text)
-            # Labels carry model/project names from external data — plain
-            # text only, so HTML-looking names can't restyle the popup.
-            label.setTextFormat(Qt.TextFormat.PlainText)
+            label = _ElidedLabel(label_text)
             font = label.font()
             font.setFamily("monospace")
             label.setFont(font)
@@ -556,6 +559,31 @@ class _BarChartWidget(QWidget):
                 row_layout.addLayout(bd_row)
 
             self._layout.insertWidget(self._layout.count() - 1, row_widget)
+
+
+class _ElidedLabel(QLabel):
+    """Row label that ends in "…" instead of being cut off when too long for
+    the fixed-width popup; the full text is then in its tooltip."""
+
+    def __init__(self, text: str) -> None:
+        super().__init__(text)
+        self._full = text
+        # Model/project names come from external data — plain text only, so
+        # HTML-looking names can't restyle the popup.
+        self.setTextFormat(Qt.TextFormat.PlainText)
+
+    def sizeHint(self):
+        # Pinned to the full text, or eliding would shrink the hint and let
+        # the layout squeeze the label further on every pass.
+        hint = super().sizeHint()
+        hint.setWidth(self.fontMetrics().horizontalAdvance(self._full) + 2)
+        return hint
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        shown = self.fontMetrics().elidedText(self._full, Qt.TextElideMode.ElideRight, self.width())
+        self.setText(shown)
+        self.setToolTip(self._full if shown != self._full else "")
 
 
 _BREAKDOWN_CATEGORIES = [

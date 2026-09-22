@@ -14,6 +14,8 @@ from ctfl.popup import PopupWidget
 from ctfl.providers import DailyUsage, ModelTokens, ProjectUsage, UsageData
 
 _TODAY = date.today()
+_ENGLISH_MONTHS = ["January", "February", "March", "April", "May", "June", "July",
+                   "August", "September", "October", "November", "December"]
 
 
 def _iso(days_ago: int) -> str:
@@ -112,7 +114,7 @@ def test_model_rows_carry_their_cost(popup):
 def test_usage_rows_are_labelled_in_english(popup):
     popup.update_data(_data())
     assert dates.day_label(_TODAY) in _texts(popup._daily_chart)
-    assert dates.month_name(_TODAY.month) in dates.day_label(_TODAY)
+    assert _ENGLISH_MONTHS[_TODAY.month - 1] in dates.day_label(_TODAY)
 
 
 def test_loading_is_shown_beside_the_dropdown(popup):
@@ -127,3 +129,55 @@ def test_error_replaces_the_period(popup):
     assert popup._period_total_label.text() == "Error: <b>boom</b>"
     assert popup._period_total_label.textFormat() == Qt.TextFormat.PlainText
     assert _texts(popup._model_chart) == []
+
+
+def test_error_on_first_render_is_not_cut_off(qapp, monkeypatch):
+    monkeypatch.setattr(dates, "_conventions", lambda: QLocale("fr_FR"))
+    w = PopupWidget(Config())
+    w.show()
+    qapp.processEvents()
+    w.update_data(UsageData(error="Local: file access error — no such file or directory; "
+                                  "API: network error — temporary failure in name resolution"))
+    qapp.processEvents()
+    label = w._period_total_label
+    assert label.height() >= label.heightForWidth(label.width())
+    w.close()
+
+
+def test_changing_period_keeps_the_error(popup):
+    popup.update_data(UsageData(error="boom"))
+    _select(popup, "month")
+    assert popup._period_total_label.text() == "Error: boom"
+
+
+def test_changing_period_while_loading_keeps_loading(popup):
+    popup.update_data(_data())
+    popup.show_loading()
+    _select(popup, "month")
+    assert popup._period_total_label.text() == "Loading..."
+    popup.update_data(_data())
+    month_total = "3.0M tokens · $9.00" if _TODAY.day > 1 else "2.0M tokens · $8.00"
+    assert popup._period_total_label.text() == month_total
+
+
+def test_long_project_name_is_elided_with_a_tooltip(popup, qapp):
+    name = "Deleted-project-" + "-segment" * 12
+    data = _data()
+    data.projects_by_day[_iso(0)] = [ProjectUsage(name, "-p-long", total_tokens=2_000_000)]
+    popup.show()
+    popup.update_data(data)
+    popup._tabs.setCurrentIndex(2)
+    qapp.processEvents()
+    [label] = [lbl for lbl in popup._project_chart.findChildren(QLabel) if lbl.toolTip() == name]
+    assert label.text().endswith("…")
+    assert label.fontMetrics().horizontalAdvance(label.text()) <= label.width()
+    assert popup.width() == 500
+
+
+def test_short_name_has_no_tooltip(popup, qapp):
+    popup.show()
+    popup.update_data(_data())
+    popup._tabs.setCurrentIndex(2)
+    qapp.processEvents()
+    [label] = [lbl for lbl in popup._project_chart.findChildren(QLabel) if lbl.text() == "Ctfl"]
+    assert label.toolTip() == ""

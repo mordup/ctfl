@@ -39,11 +39,10 @@ Reproduce a CONFIRMED finding yourself before acting on it. Fix only
 CONFIRMED or HIGH; a defect you demonstrated directly counts as CONFIRMED
 whatever the agent said. Lower tiers go in the report.
 
-Commit fixes with `/commit`, with one adjustment to its one-commit-per-unit
-rule: a fix that changes what the user sees (a figure, a label, a window, a
-setting's effect) gets its own commit; every other audit fix (hardening,
-wording, dead code, comments) goes into a single
-`fix: address release audit findings` commit with one bullet per item.
+Commit fixes with `/commit`, overriding its one-commit-per-unit rule: every
+audit fix goes into a single `fix: address release audit findings` commit
+with one bullet per item. Never squash a fix into an earlier commit; the
+audit trail is worth more than a shorter log.
 
 ## 3. Prepare the release content
 
@@ -76,8 +75,9 @@ without further questions until step 8.
 
 When docs decisions were taken, update `.claude/docs-deferred.md`: add newly
 deferred items with the release they were deferred at, remove fixed or
-dropped ones. Docs fixes marked "fix now" are made in the ctfl-docs repo
-before continuing.
+dropped ones. It is committed with the version bump in step 5, not on its
+own. Docs fixes marked "fix now" are made in the ctfl-docs repo before
+continuing.
 
 ## 5. Bump version
 
@@ -96,7 +96,8 @@ grep -q "pkgver=${VERSION}" PKGBUILD \
 
 `appimage/requirements.txt` is not on the list: `release.sh` overwrites it.
 
-Commit the three files as `release: X.Y.Z`.
+Commit the three files, plus `.claude/docs-deferred.md` when it changed,
+as `release: X.Y.Z`.
 
 ## 6. Build
 

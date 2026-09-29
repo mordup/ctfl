@@ -7,6 +7,7 @@ from ctfl.popup import _short_model
     ("claude-opus-5-5", "Opus 5.5"),
     ("claude-fable-5-1", "Fable 5.1"),
     ("claude-opus-5", "Opus 5"),
+    ("claude-opus-5-5[1m]", "Opus 5.5"),
     ("claude-opus-4-5-20251101", "Opus 4.5"),
     ("claude-haiku-4-5-20251001", "Haiku 4.5"),
     ("opus-4-6", "Opus 4.6"),

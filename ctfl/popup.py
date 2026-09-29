@@ -664,7 +664,7 @@ def _short_model(model: str) -> str:
     ('claude-3-5-sonnet-20241022') reads the same way: 'Sonnet 3.5'.
     """
     words, version = [], []
-    for part in model.removeprefix("claude-").split("-"):
+    for part in model.removeprefix("claude-").split("[", 1)[0].split("-"):
         if not part.isdigit():
             words.append(part)
         elif len(part) != 8:  # 8 digits is a date suffix

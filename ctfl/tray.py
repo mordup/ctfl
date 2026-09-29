@@ -30,6 +30,7 @@ from .updater import installed_version
 
 _PROFILE_AUTO = "auto"
 _INSTALLED_VERSION_POLL_MS = 60_000
+_PRICING_FEED_POLL_MS = 24 * 3600 * 1000
 
 _ICON_PATHS = [
     Path(f"/usr/share/icons/hicolor/scalable/apps/{ICON_THEME_NAME}.svg"),
@@ -44,6 +45,14 @@ class _UpdateCheckWorker(QObject):
     def run(self) -> None:
         from .updater import check_for_update
         self.finished.emit(check_for_update())
+
+
+class _PricingFeedWorker(QObject):
+    finished = pyqtSignal(object)  # parsed feed or None
+
+    def run(self) -> None:
+        from .providers.pricing import fetch_feed
+        self.finished.emit(fetch_feed())
 
 
 class _UpdateApplyWorker(QObject):
@@ -110,6 +119,7 @@ class TrayIcon(QSystemTrayIcon):
         self._oauth = oauth_provider
         self._thread: QThread | None = None
         self._update_thread: QThread | None = None
+        self._pricing_thread: QThread | None = None
         self._latest_data: UsageData | None = None
         self._pending_release: dict | None = None
         self._installed_version: str | None = None
@@ -150,6 +160,11 @@ class TrayIcon(QSystemTrayIcon):
         # Initial check after short delay
         if self._config.update_check_interval > 0:
             QTimer.singleShot(5000, self._check_for_updates)
+
+        self._pricing_timer = QTimer()
+        self._pricing_timer.timeout.connect(self._fetch_pricing_feed)
+        self._pricing_timer.start(_PRICING_FEED_POLL_MS)
+        QTimer.singleShot(5000, self._fetch_pricing_feed)
 
         # A package manager upgrading the files under this process leaves
         # the old version running until it restarts.
@@ -500,6 +515,33 @@ class TrayIcon(QSystemTrayIcon):
         self._update_worker = worker
         thread.start()
 
+    def _fetch_pricing_feed(self) -> None:
+        if not self._config.estimate_costs:
+            return
+        if self._pricing_thread is not None and self._pricing_thread.isRunning():
+            return
+        thread = QThread()
+        worker = _PricingFeedWorker()
+        worker.moveToThread(thread)
+        thread.started.connect(worker.run)
+        worker.finished.connect(self._on_pricing_feed)
+        worker.finished.connect(thread.quit)
+        thread.finished.connect(lambda: self._on_pricing_thread_finished(thread))
+        self._pricing_thread = thread
+        self._pricing_worker = worker
+        thread.start()
+
+    def _on_pricing_thread_finished(self, thread: QThread) -> None:
+        thread.deleteLater()
+        if self._pricing_thread is thread:
+            self._pricing_thread = None
+            self._pricing_worker = None
+
+    def _on_pricing_feed(self, feed) -> None:
+        from .providers.pricing import apply_feed
+        if feed is not None and apply_feed(feed):
+            self.refresh()
+
     def _on_update_thread_finished(self, thread: QThread) -> None:
         thread.deleteLater()
         if self._update_thread is thread:
@@ -756,9 +798,18 @@ class TrayIcon(QSystemTrayIcon):
             self._update_thread.terminate()
             self._update_thread.wait(2000)
 
+    def _cleanup_pricing_thread(self) -> None:
+        if self._pricing_thread is None or not self._pricing_thread.isRunning():
+            return
+        self._pricing_thread.quit()
+        if not self._pricing_thread.wait(5000):
+            self._pricing_thread.terminate()
+            self._pricing_thread.wait(2000)
+
     def _restart(self) -> None:
         self._cleanup_thread()
         self._cleanup_update_thread()
+        self._cleanup_pricing_thread()
         # startDetached races the QSettings destructor otherwise, so the
         # replacement can read the file before the last change is on disk.
         self._config.sync()
@@ -770,6 +821,7 @@ class TrayIcon(QSystemTrayIcon):
     def _quit(self) -> None:
         self._cleanup_thread()
         self._cleanup_update_thread()
+        self._cleanup_pricing_thread()
         self._config.sync()
         from PyQt6.QtWidgets import QApplication
         QApplication.quit()

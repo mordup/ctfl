@@ -15,6 +15,7 @@ from .credentials import Credentials
 from .providers.api import ApiProvider
 from .providers.local import LocalProvider
 from .providers.oauth import OAuthUsageProvider
+from .providers.pricing import load_cached_feed
 from .tray import TrayIcon
 
 
@@ -39,6 +40,7 @@ def main() -> int:
         return 1
 
     config = Config()
+    load_cached_feed()
     credentials = Credentials()
     autostart = Autostart()
     local_provider = LocalProvider(config)

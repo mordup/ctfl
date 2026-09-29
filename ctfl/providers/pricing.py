@@ -2,6 +2,16 @@
 
 from __future__ import annotations
 
+import json
+import math
+import os
+import re
+from pathlib import Path
+from urllib.error import URLError
+from urllib.request import Request, urlopen
+
+_Rates = tuple[float, float, float, float, float]
+
 # Per-million-token pricing (USD), from platform.claude.com/docs/en/about-claude/pricing
 # as of September 2026. Anthropic quotes list prices exclusive of tax.
 #
@@ -19,7 +29,11 @@ from __future__ import annotations
 # closed. An id that is not listed resolves to None so estimate_daily_cost
 # suppresses the day rather than reporting a wrong number, which also makes a
 # missing entry visible instead of silently mispriced.
-_PRICING: dict[str, tuple[float, float, float, float, float]] = {
+#
+# Models released after this build are priced by the pricing.json feed at the
+# repo root (see fetch_feed). Add every new model there too: installs already
+# in the field only learn about it from the feed.
+_PRICING: dict[str, _Rates] = {
     # Fable / Mythos
     "fable-5-1":  (10.00, 50.00, 0.25, 12.50, 20.00),
     "mythos-5-1": (10.00, 50.00, 0.25, 12.50, 20.00),
@@ -50,7 +64,7 @@ _PRICING: dict[str, tuple[float, float, float, float, float]] = {
 # whole context window; caching multipliers stack on top of it. Opus 4.7 rejects
 # speed="fast" outright and Opus 4.6 silently runs at standard rates, so any
 # other model asking for fast mode falls back to its standard entry.
-_FAST_PRICING: dict[str, tuple[float, float, float, float, float]] = {
+_FAST_PRICING: dict[str, _Rates] = {
     "opus-5-5": ( 8.00, 40.00, 0.40, 10.00, 16.00),
     "opus-5":   (10.00, 50.00, 1.00, 12.50, 20.00),
     "opus-4-8": (10.00, 50.00, 1.00, 12.50, 20.00),
@@ -59,7 +73,21 @@ _FAST_PRICING: dict[str, tuple[float, float, float, float, float]] = {
 # Time-limited launch pricing: family key -> (last date inclusive, rates).
 # Usage on or before the cutoff bills at the promotional rate; after it, the
 # standard _PRICING entry applies. Dates are ISO, so string comparison is safe.
-_INTRO_PRICING: dict[str, tuple[str, tuple[float, float, float, float, float]]] = {}
+_INTRO_PRICING: dict[str, tuple[str, _Rates]] = {}
+
+_FEED_URL = "https://raw.githubusercontent.com/mordup/ctfl/main/pricing.json"
+_FEED_CACHE = Path.home() / ".cache" / "ctfl" / "pricing.json"
+_FEED_SCHEMA = 1
+_MAX_FEED_BYTES = 64 * 1024
+_FEED_FIELDS = {"schema", "updated", "models", "fast", "ignore"}
+_RATE_FIELDS = ("input", "output", "cache_read", "cache_write_5m", "cache_write_1h")
+_FEED_KEY_RE = re.compile(r"[a-z0-9-]{1,40}")
+_MAX_RATE = 1000.0
+
+# (standard, fast) rates from the feed, layered over the bundled tables.
+# Replaced as a whole, never mutated, so a fetch worker reading it mid-swap
+# sees either the old or the new feed.
+_feed: tuple[dict[str, _Rates], dict[str, _Rates]] = ({}, {})
 
 
 def _normalize(model: str) -> str:
@@ -84,7 +112,7 @@ def _match_key(model: str) -> str | None:
     closed, rather than inheriting a sibling's rates.
     """
     name = _normalize(model)
-    return name if name in _PRICING else None
+    return name if name in _PRICING or name in _feed[0] else None
 
 
 def _match_pricing(
@@ -100,12 +128,15 @@ def _match_pricing(
     key = _match_key(model)
     if key is None:
         return None
-    if speed == "fast" and key in _FAST_PRICING:
-        return _FAST_PRICING[key]
+    feed_standard, feed_fast = _feed
+    if speed == "fast":
+        fast = feed_fast.get(key) or _FAST_PRICING.get(key)
+        if fast is not None:
+            return fast
     intro = _INTRO_PRICING.get(key)
     if intro is not None and date is not None and date <= intro[0]:
         return intro[1]
-    return _PRICING[key]
+    return feed_standard.get(key) or _PRICING[key]
 
 
 def estimate_daily_cost(
@@ -138,3 +169,95 @@ def estimate_daily_cost(
             return None
         total += sum(count * rate / 1_000_000 for count, rate in zip(tokens, rates, strict=True))
     return total
+
+
+def _parse_rates(section: object) -> dict[str, _Rates] | None:
+    if not isinstance(section, dict):
+        return None
+    table: dict[str, _Rates] = {}
+    for key, entry in section.items():
+        if not _FEED_KEY_RE.fullmatch(key):
+            return None
+        if not isinstance(entry, dict) or set(entry) != set(_RATE_FIELDS):
+            return None
+        values = [entry[f] for f in _RATE_FIELDS]
+        for v in values:
+            if isinstance(v, bool) or not isinstance(v, int | float):
+                return None
+            if not math.isfinite(v) or not 0 <= v <= _MAX_RATE:
+                return None
+        table[key] = tuple(float(v) for v in values)
+    return table
+
+
+def parse_feed(raw: bytes) -> tuple[dict[str, _Rates], dict[str, _Rates]] | None:
+    """Validate a pricing.json payload into (standard, fast) rate tables.
+
+    Any deviation from the schema rejects the whole file: a partially applied
+    feed could price one model from it and its fast mode from somewhere else.
+    """
+    if len(raw) > _MAX_FEED_BYTES:
+        return None
+    try:
+        data = json.loads(raw)
+    except (ValueError, RecursionError):
+        return None
+    if not isinstance(data, dict) or not set(data) <= _FEED_FIELDS:
+        return None
+    if data.get("schema") != _FEED_SCHEMA or "models" not in data:
+        return None
+    ignore = data.get("ignore", [])
+    if not isinstance(ignore, list) or not all(
+        isinstance(k, str) and _FEED_KEY_RE.fullmatch(k) for k in ignore
+    ):
+        return None
+    standard = _parse_rates(data["models"])
+    fast = _parse_rates(data.get("fast", {}))
+    if standard is None or fast is None:
+        return None
+    return standard, fast
+
+
+def apply_feed(feed: tuple[dict[str, _Rates], dict[str, _Rates]]) -> bool:
+    """Layer a parsed feed over the bundled tables; True if the rates changed."""
+    global _feed
+    if feed == _feed:
+        return False
+    _feed = feed
+    return True
+
+
+def load_cached_feed() -> None:
+    try:
+        with open(_FEED_CACHE, "rb") as f:
+            raw = f.read(_MAX_FEED_BYTES + 1)
+    except OSError:
+        return
+    feed = parse_feed(raw)
+    if feed is not None:
+        apply_feed(feed)
+
+
+def fetch_feed() -> tuple[dict[str, _Rates], dict[str, _Rates]] | None:
+    """Download and validate the pricing feed, caching it for offline starts.
+
+    Returns None on any network or validation failure; callers keep whatever
+    feed they already have.
+    """
+    req = Request(_FEED_URL, headers={"User-Agent": "ctfl-pricing"})
+    try:
+        with urlopen(req, timeout=10) as resp:
+            raw = resp.read(_MAX_FEED_BYTES + 1)
+    except (URLError, OSError, ValueError):
+        return None
+    feed = parse_feed(raw)
+    if feed is None:
+        return None
+    try:
+        _FEED_CACHE.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+        tmp = _FEED_CACHE.with_suffix(".tmp")
+        tmp.write_bytes(raw)
+        os.replace(tmp, _FEED_CACHE)
+    except OSError:
+        pass
+    return feed

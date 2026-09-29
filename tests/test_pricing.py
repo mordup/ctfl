@@ -1,7 +1,17 @@
+import json
+from pathlib import Path
+
 import pytest
 
 from ctfl.providers import pricing
-from ctfl.providers.pricing import _match_pricing, _normalize, estimate_daily_cost
+from ctfl.providers.pricing import (
+    _match_pricing,
+    _normalize,
+    apply_feed,
+    estimate_daily_cost,
+    load_cached_feed,
+    parse_feed,
+)
 
 _OPUS_5_5 = (4.00, 20.00, 0.20, 5.00, 8.00)
 _OPUS_CURRENT = (5.00, 25.00, 0.50, 6.25, 10.00)
@@ -294,3 +304,102 @@ def test_estimate_uses_intro_rate_for_dated_day(monkeypatch):
     tokens = {("claude-opus-5", "standard"): (1_000_000, 1_000_000, 0, 0, 0)}
     assert estimate_daily_cost(tokens, date="2026-08-15") == 3.00  # $1 + $2
     assert estimate_daily_cost(tokens, date="2026-09-01") == 30.00  # $5 + $25
+
+
+# --- pricing feed ---
+
+_QUASAR = {"input": 1, "output": 2, "cache_read": 0.1, "cache_write_5m": 1.25, "cache_write_1h": 2}
+
+
+@pytest.fixture(autouse=True)
+def _no_feed(monkeypatch):
+    monkeypatch.setattr(pricing, "_feed", ({}, {}))
+
+
+def _feed_bytes(**overrides) -> bytes:
+    data = {"schema": 1, "updated": "2026-09-29", "models": {"quasar-9": _QUASAR}}
+    data.update(overrides)
+    return json.dumps(data).encode()
+
+
+def test_repo_pricing_json_is_valid():
+    raw = (Path(__file__).resolve().parent.parent / "pricing.json").read_bytes()
+    assert parse_feed(raw) is not None
+
+
+def test_feed_prices_unknown_model():
+    apply_feed(parse_feed(_feed_bytes()))
+    assert _match_pricing("claude-quasar-9") == (1.0, 2.0, 0.1, 1.25, 2.0)
+
+
+def test_feed_overrides_bundled_rate():
+    apply_feed(parse_feed(_feed_bytes(models={"opus-5": _QUASAR})))
+    assert _match_pricing("claude-opus-5") == (1.0, 2.0, 0.1, 1.25, 2.0)
+
+
+def test_feed_fast_rate():
+    apply_feed(parse_feed(_feed_bytes(fast={"quasar-9": _QUASAR | {"input": 7}})))
+    assert _match_pricing("claude-quasar-9", speed="fast")[0] == 7.0
+
+
+def test_feed_without_entry_keeps_bundled_rates():
+    apply_feed(parse_feed(_feed_bytes()))
+    assert _match_pricing("claude-opus-5") == _OPUS_CURRENT
+    assert _match_pricing("claude-opus-5", speed="fast") == _OPUS_FAST
+
+
+def test_apply_feed_reports_change_only_once():
+    feed = parse_feed(_feed_bytes())
+    assert apply_feed(feed) is True
+    assert apply_feed(feed) is False
+
+
+@pytest.mark.parametrize("raw", [
+    b"not json",
+    b"[]",
+    b"[" * 50_000,
+    _feed_bytes(schema=2),
+    _feed_bytes(extra=1),
+    _feed_bytes(models=[]),
+    _feed_bytes(models={"Quasar 9": _QUASAR}),
+    _feed_bytes(models={"quasar-9": {"input": 1}}),
+    _feed_bytes(models={"quasar-9": _QUASAR | {"note": "x"}}),
+    _feed_bytes(models={"quasar-9": _QUASAR | {"input": "1"}}),
+    _feed_bytes(models={"quasar-9": _QUASAR | {"input": True}}),
+    _feed_bytes(models={"quasar-9": _QUASAR | {"input": -1}}),
+    _feed_bytes(models={"quasar-9": _QUASAR | {"input": 1001}}),
+    _feed_bytes(models={"quasar-9": _QUASAR | {"input": float("nan")}}),
+    _feed_bytes(fast={"quasar-9": {}}),
+    _feed_bytes(ignore="quasar-9"),
+    _feed_bytes(ignore=["Quasar"]),
+    _feed_bytes(updated="x" * 70_000),
+])
+def test_parse_feed_rejects(raw):
+    assert parse_feed(raw) is None
+
+
+def test_parse_feed_without_models_is_rejected():
+    assert parse_feed(json.dumps({"schema": 1}).encode()) is None
+
+
+def test_load_cached_feed(tmp_path, monkeypatch):
+    cache = tmp_path / "pricing.json"
+    cache.write_bytes(_feed_bytes())
+    monkeypatch.setattr(pricing, "_FEED_CACHE", cache)
+    load_cached_feed()
+    assert _match_pricing("claude-quasar-9") is not None
+
+
+def test_load_invalid_cached_feed_keeps_bundled_rates(tmp_path, monkeypatch):
+    cache = tmp_path / "pricing.json"
+    cache.write_bytes(_feed_bytes(schema=2))
+    monkeypatch.setattr(pricing, "_FEED_CACHE", cache)
+    load_cached_feed()
+    assert _match_pricing("claude-quasar-9") is None
+    assert _match_pricing("claude-opus-5") == _OPUS_CURRENT
+
+
+def test_load_missing_cached_feed(tmp_path, monkeypatch):
+    monkeypatch.setattr(pricing, "_FEED_CACHE", tmp_path / "absent.json")
+    load_cached_feed()
+    assert _match_pricing("claude-quasar-9") is None

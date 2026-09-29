@@ -17,6 +17,7 @@ import subprocess
 import sys
 import tempfile
 from enum import Enum, auto
+from http.client import HTTPException
 from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlparse
@@ -111,7 +112,7 @@ def check_for_update() -> dict | None:
         })
         with urlopen(req, timeout=10) as resp:
             data = json.loads(resp.read())
-    except (HTTPError, URLError, OSError, json.JSONDecodeError):
+    except (HTTPError, URLError, OSError, json.JSONDecodeError, HTTPException):
         return None
 
     tag = data.get("tag_name", "")

@@ -1,9 +1,12 @@
 import json
+import socket
+import threading
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
 
+from ctfl import updater
 from ctfl.updater import (
     InstallMethod,
     _find_asset,
@@ -421,3 +424,20 @@ def test_installed_version_torn_read_inside_a_multibyte_character(tmp_path):
 def test_installed_version_matches_running_package():
     from ctfl import __version__
     assert installed_version() == __version__
+
+
+def test_check_for_update_survives_malformed_http_response(monkeypatch):
+    server = socket.create_server(("127.0.0.1", 0))
+
+    def reply_garbage():
+        conn, _ = server.accept()
+        conn.recv(4096)
+        conn.sendall(b"GARBAGE\r\n\r\n")
+        conn.close()
+
+    threading.Thread(target=reply_garbage, daemon=True).start()
+    monkeypatch.setattr(updater, "_RELEASES_URL", f"http://127.0.0.1:{server.getsockname()[1]}/")
+    try:
+        assert check_for_update() is None
+    finally:
+        server.close()

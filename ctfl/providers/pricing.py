@@ -6,6 +6,7 @@ import json
 import math
 import os
 import re
+from http.client import HTTPException
 from pathlib import Path
 from urllib.error import URLError
 from urllib.request import Request, urlopen
@@ -248,7 +249,7 @@ def fetch_feed() -> tuple[dict[str, _Rates], dict[str, _Rates]] | None:
     try:
         with urlopen(req, timeout=10) as resp:
             raw = resp.read(_MAX_FEED_BYTES + 1)
-    except (URLError, OSError, ValueError):
+    except (URLError, OSError, ValueError, HTTPException):
         return None
     feed = parse_feed(raw)
     if feed is None:

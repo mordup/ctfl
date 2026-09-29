@@ -1,4 +1,6 @@
 import json
+import socket
+import threading
 from pathlib import Path
 
 import pytest
@@ -403,3 +405,21 @@ def test_load_missing_cached_feed(tmp_path, monkeypatch):
     monkeypatch.setattr(pricing, "_FEED_CACHE", tmp_path / "absent.json")
     load_cached_feed()
     assert _match_pricing("claude-quasar-9") is None
+
+
+def test_fetch_feed_survives_malformed_http_response(tmp_path, monkeypatch):
+    server = socket.create_server(("127.0.0.1", 0))
+
+    def reply_garbage():
+        conn, _ = server.accept()
+        conn.recv(4096)
+        conn.sendall(b"GARBAGE\r\n\r\n")
+        conn.close()
+
+    threading.Thread(target=reply_garbage, daemon=True).start()
+    monkeypatch.setattr(pricing, "_FEED_URL", f"http://127.0.0.1:{server.getsockname()[1]}/")
+    monkeypatch.setattr(pricing, "_FEED_CACHE", tmp_path / "pricing.json")
+    try:
+        assert pricing.fetch_feed() is None
+    finally:
+        server.close()

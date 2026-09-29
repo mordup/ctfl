@@ -50,6 +50,10 @@ def test_sonnet_5():
     assert _match_pricing("claude-sonnet-5") == _SONNET_5
 
 
+def test_sonnet_5_5():
+    assert _match_pricing("claude-sonnet-5-5") == _SONNET_5
+
+
 def test_fable_5():
     assert _match_pricing("claude-fable-5") == _FABLE_5
 

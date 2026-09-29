@@ -37,6 +37,7 @@ _PRICING: dict[str, tuple[float, float, float, float, float]] = {
     "opus-4-0":   (15.00, 75.00, 1.50, 18.75, 30.00),
     "opus-4":     (15.00, 75.00, 1.50, 18.75, 30.00),
     # Sonnet. Sonnet 5's $2/$10 launch rate was made permanent in September 2026.
+    "sonnet-5-5": ( 2.00, 10.00, 0.20,  2.50,  4.00),
     "sonnet-5":   ( 2.00, 10.00, 0.20,  2.50,  4.00),
     "sonnet-4-6": ( 3.00, 15.00, 0.30,  3.75,  6.00),
     "sonnet-4-5": ( 3.00, 15.00, 0.30,  3.75,  6.00),

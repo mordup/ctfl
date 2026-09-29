@@ -86,8 +86,8 @@ _FEED_KEY_RE = re.compile(r"[a-z0-9-]{1,40}")
 _MAX_RATE = 1000.0
 
 # (standard, fast) rates from the feed, layered over the bundled tables.
-# Replaced as a whole, never mutated, so a fetch worker reading it mid-swap
-# sees either the old or the new feed.
+# Replaced as a whole, never mutated, and read once per lookup, so a fetch
+# worker racing a swap sees either the old or the new feed, never both.
 _feed: tuple[dict[str, _Rates], dict[str, _Rates]] = ({}, {})
 
 
@@ -105,7 +105,7 @@ def _normalize(model: str) -> str:
     return "-".join(cleaned)
 
 
-def _match_key(model: str) -> str | None:
+def _match_key(model: str, feed_standard: dict[str, _Rates]) -> str | None:
     """Return the pricing key for a model id, or None when it is not listed.
 
     Matching is exact on the normalised id. A point release we have not priced
@@ -113,7 +113,7 @@ def _match_key(model: str) -> str | None:
     closed, rather than inheriting a sibling's rates.
     """
     name = _normalize(model)
-    return name if name in _PRICING or name in _feed[0] else None
+    return name if name in _PRICING or name in feed_standard else None
 
 
 def _match_pricing(
@@ -126,10 +126,10 @@ def _match_pricing(
     that has since expired; when it is None the standard rate applies, which is
     the safer assumption for undated callers.
     """
-    key = _match_key(model)
+    feed_standard, feed_fast = _feed
+    key = _match_key(model, feed_standard)
     if key is None:
         return None
-    feed_standard, feed_fast = _feed
     if speed == "fast":
         fast = feed_fast.get(key) or _FAST_PRICING.get(key)
         if fast is not None:

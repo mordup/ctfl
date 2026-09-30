@@ -1,0 +1,52 @@
+name: Pricing sync
+
+on:
+  schedule:
+    - cron: "17 6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+
+      - name: Update pricing.json from Anthropic's pricing page
+        run: python scripts/sync_pricing.py > changes.md
+        env:
+          PYTHONPATH: .
+
+      # One PR, rebuilt from main each run, so it never conflicts. A PR opened
+      # with GITHUB_TOKEN does not trigger CI; the script validates the file
+      # with the app's own parser before writing it.
+      - name: Open or update the pricing PR
+        run: |
+          git diff --quiet pricing.json && exit 0
+          branch=pricing-sync
+          if git fetch --quiet origin "$branch" 2>/dev/null \
+              && git diff --quiet FETCH_HEAD -- pricing.json; then
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git switch --quiet -C "$branch"
+          git add pricing.json
+          git commit --quiet -m "fix: update model prices from Anthropic's pricing page"
+          git push --quiet --force origin "$branch"
+          if [ "$(gh pr view "$branch" --json state -q .state 2>/dev/null)" = OPEN ]; then
+            gh pr edit "$branch" --body-file changes.md
+          else
+            gh pr create --head "$branch" --base main \
+              --title "fix: update model prices from Anthropic's pricing page" \
+              --body-file changes.md
+          fi
+        env:
+          GH_TOKEN: ${{ github.token }}

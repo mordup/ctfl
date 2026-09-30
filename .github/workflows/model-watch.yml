@@ -1,0 +1,43 @@
+name: Model watch
+
+on:
+  schedule:
+    - cron: "17 6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+
+      - name: List unpriced models
+        run: python scripts/check_new_models.py > unpriced.txt
+        env:
+          PYTHONPATH: .
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+
+      - name: Open an issue per unpriced model
+        run: |
+          gh label create new-model --color D93F0B \
+            --description "Model served by the API with no price in pricing.json" --force
+          open=$(gh issue list --label new-model --state open --limit 200 --json title -q '.[].title')
+          while read -r model; do
+            title="Price missing: $model"
+            grep -qxF "$title" <<<"$open" && continue
+            gh issue create --label new-model --title "$title" --body "\`$model\` is served by the Models API but CTFL has no price for it.
+
+          Add it to \`models\` in \`pricing.json\` with the rates from https://platform.claude.com/docs/en/about-claude/pricing, or to \`ignore\` if CTFL should not price it. Never remove or rename existing entries: installed versions would lose the price.
+
+          Closing this issue without doing either opens a new one on the next run."
+          done < unpriced.txt
+        env:
+          GH_TOKEN: ${{ github.token }}

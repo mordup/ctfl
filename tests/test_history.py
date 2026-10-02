@@ -61,3 +61,13 @@ def test_saved_file_is_private(tmp_path):
     path = tmp_path / "h.json"
     history.save(path, {})
     assert path.stat().st_mode & 0o777 == 0o600
+
+
+def test_unreadable_file_is_left_alone(tmp_path):
+    path = tmp_path / "h.json"
+    history.save(path, {"2026-09-30": _record()})
+    path.chmod(0)
+    try:
+        assert history.load(path) is None
+    finally:
+        path.chmod(0o600)

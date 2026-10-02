@@ -157,3 +157,35 @@ def test_unwritable_history_does_not_break_the_refresh(tmp_path, monkeypatch):
     data = provider.fetch(days=7)
     assert data.error is None
     assert [d.date for d in data.daily] == [_date(1)]
+
+
+def test_unreadable_history_is_not_overwritten(tmp_path, monkeypatch):
+    provider = _provider(tmp_path, monkeypatch)
+    path = history_file(tmp_path)
+    history.save(path, {_date(20): DayRecord(messages=5)})
+    _write(tmp_path, [_record(2)])
+    path.chmod(0)
+    try:
+        provider.fetch(days=7)
+    finally:
+        path.chmod(0o600)
+    assert list(history.load(path)) == [_date(20)]
+
+
+def test_bad_transcript_elsewhere_does_not_break_the_shown_instance(tmp_path, monkeypatch):
+    shown, other = tmp_path / "shown", tmp_path / "other"
+    _write(shown, [_record(1)])
+    bad = _record(1)
+    bad["message"]["usage"]["input_tokens"] = None
+    _write(other, [bad])
+    monkeypatch.setattr(
+        "ctfl.providers.local.resolve_profile",
+        lambda config=None: Instance(name="shown", path=shown),
+    )
+    monkeypatch.setattr(
+        "ctfl.providers.local.discover_instances",
+        lambda: [Instance(name="shown", path=shown), Instance(name="other", path=other)],
+    )
+    data = LocalProvider().fetch(days=7)
+    assert data.error is None
+    assert [d.date for d in data.daily] == [_date(1)]

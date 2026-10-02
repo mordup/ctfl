@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 from collections import defaultdict
@@ -238,13 +239,13 @@ class LocalProvider:
             signature = (today, newest_jsonl_mtime(instance.projects_dir))
             if self._archived.get(instance.path) == signature:
                 continue
-            try:
+            # Best effort: a transcript this instance cannot parse must not
+            # cost the one on display its data.
+            with contextlib.suppress(Exception):
                 self._update_history(
                     instance, self._scan_jsonl_files(instance.projects_dir, start), today
                 )
-            except OSError:
-                continue
-            self._archived[instance.path] = signature
+                self._archived[instance.path] = signature
 
     def _read_stats_cache(self, stats_file: Path) -> dict:
         if not stats_file.exists():

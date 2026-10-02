@@ -44,10 +44,15 @@ def history_file(instance_path: Path) -> Path:
 
 def load(path: Path) -> dict[str, DayRecord] | None:
     """The stored days, {} when there is no usable file, or None when the file
-    was written by a newer CTFL and must be left alone."""
+    must be left alone: it could not be read, so its days may still be intact,
+    or a newer CTFL wrote it."""
     try:
         raw = json.loads(path.read_bytes())
-    except (OSError, ValueError):
+    except FileNotFoundError:
+        return {}
+    except OSError:
+        return None
+    except ValueError:
         return {}
     if not isinstance(raw, dict) or not isinstance(raw.get("days"), dict):
         return {}

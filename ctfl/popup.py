@@ -299,10 +299,10 @@ class PopupWidget(QWidget):
         self._limits_frame.updateGeometry()
         self.layout().invalidate()
         self.layout().activate()
-        self.setFixedSize(
-            max(_POPUP_WIDTH, self.layout().minimumSize().width()),
-            self.layout().sizeHint().height(),
-        )
+        width = max(_POPUP_WIDTH, self.layout().minimumSize().width())
+        self.setFixedSize(width, max(
+            self.layout().sizeHint().height(), self.layout().totalHeightForWidth(width),
+        ))
 
     def _update_limits(self, limits: list[RateLimitInfo]) -> None:
         # Clear previous widgets. setParent(None) detaches them from the

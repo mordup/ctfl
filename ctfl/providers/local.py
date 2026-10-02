@@ -1,14 +1,16 @@
 from __future__ import annotations
 
 import json
+import os
 from collections import defaultdict
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 from ..constants import DATE_FMT_ISO
-from . import DailyUsage, ModelTokens, ProjectUsage, UsageData
-from .instance import resolve_profile
+from . import DailyUsage, ModelTokens, ProjectUsage, UsageData, history
+from .history import DayRecord, history_file, history_start
+from .instance import Instance, discover_instances, newest_jsonl_mtime, resolve_profile
 
 if TYPE_CHECKING:
     from ..config import Config
@@ -48,6 +50,31 @@ def _resolve_project_name(project_path: Path) -> str:
     return resolved.name.capitalize()
 
 
+def _daily_usage(date_str: str, rec: DayRecord) -> DailyUsage:
+    return DailyUsage(
+        date=date_str,
+        message_count=rec.messages,
+        session_count=rec.sessions,
+        input_tokens=sum(t[0] for t in rec.tokens.values()),
+        output_tokens=sum(t[1] for t in rec.tokens.values()),
+        cache_read_tokens=sum(t[2] for t in rec.tokens.values()),
+        cache_creation_tokens=sum(t[3] for t in rec.tokens.values()),
+    )
+
+
+def _model_tokens(rec: DayRecord) -> list[ModelTokens]:
+    by_model: dict[str, ModelTokens] = {}
+    for (model, _speed), t in rec.tokens.items():
+        mt = by_model.get(model)
+        if mt is None:
+            mt = by_model[model] = ModelTokens(model=model)
+        mt.input_tokens += t[0]
+        mt.output_tokens += t[1]
+        mt.cache_read_tokens += t[2]
+        mt.cache_creation_tokens += t[3]
+    return list(by_model.values())
+
+
 _MAX_CACHE_ENTRIES = 1000
 
 class LocalProvider:
@@ -55,6 +82,8 @@ class LocalProvider:
         # Cache parsed JSONL keyed by (filepath, mtime) -> list of parsed records
         self._file_cache: dict[tuple[str, float], list[dict]] = {}
         self._config = config
+        # Instance path -> (day, newest transcript mtime) at its last archive pass
+        self._archived: dict[Path, tuple[date, float | None]] = {}
 
     def fetch(self, days: int) -> UsageData:
         try:
@@ -68,26 +97,38 @@ class LocalProvider:
 
     def _fetch(self, days: int) -> UsageData:
         instance = resolve_profile(self._config)
-        stats_file = instance.stats_file
-        projects_dir = instance.projects_dir
+        today = datetime.now().date()
 
         # Records are bucketed by local day (see _parse_jsonl), so the window
         # is bounded in local time too.
-        cutoff_date = (datetime.now() - timedelta(days=days - 1)).strftime(DATE_FMT_ISO)
+        cutoff_date = (today - timedelta(days=days - 1)).strftime(DATE_FMT_ISO)
 
         # The transcripts are the primary source for the whole window: they
         # carry the per-category breakdown the stats cache lacks, and so are
-        # the only source a day can be priced from. The cache, which Claude
-        # Code refreshes on its own schedule, only fills days whose transcripts
-        # are gone (cleanupPeriodDays).
-        (
-            daily_map,
-            models_by_day,
-            projects_by_day,
-            daily_model_tokens,
-        ) = self._scan_jsonl_files(projects_dir, cutoff_date)
+        # the only source a day can be priced from. CTFL's own history fills
+        # the days whose transcripts are gone (cleanupPeriodDays), and the
+        # stats cache, which Claude Code refreshes only when /stats is opened,
+        # whatever is still missing.
+        start = history_start(today).strftime(DATE_FMT_ISO)
+        records = self._update_history(
+            instance, self._scan_jsonl_files(instance.projects_dir, min(cutoff_date, start)), today
+        )
+        self._archive_other_instances(instance, today)
 
-        cache_data = self._read_stats_cache(stats_file)
+        daily_map: dict[str, DailyUsage] = {}
+        models_by_day: dict[str, list[ModelTokens]] = {}
+        projects_by_day: dict[str, list[ProjectUsage]] = {}
+        for date_str, rec in records.items():
+            if date_str < cutoff_date:
+                continue
+            daily_map[date_str] = _daily_usage(date_str, rec)
+            models_by_day[date_str] = _model_tokens(rec)
+            projects_by_day[date_str] = [
+                ProjectUsage(name=name, path=path, total_tokens=tokens, message_count=messages)
+                for path, (name, tokens, messages) in rec.projects.items()
+            ]
+
+        cache_data = self._read_stats_cache(instance.stats_file)
         activity_by_date = {
             a["date"]: a for a in cache_data.get("dailyActivity", [])
         }
@@ -121,14 +162,20 @@ class LocalProvider:
             ]
 
         # Estimate costs from per-model token data when enabled
-        if self._config and self._config.estimate_costs and daily_model_tokens:
+        if self._config and self._config.estimate_costs:
             from .pricing import estimate_daily_cost
-            for date_str, model_map in daily_model_tokens.items():
-                if date_str in daily_map and daily_map[date_str].cost_usd is None:
-                    cost = estimate_daily_cost(model_map, date=date_str)
-                    if cost is not None:
-                        daily_map[date_str].cost_usd = cost
-                for mt in models_by_day.get(date_str, []):
+            for date_str, rec in records.items():
+                if date_str < cutoff_date or not rec.tokens:
+                    continue
+                # Cache writes are split by TTL because the two are billed at
+                # different rates (1.25x input for 5-minute, 2x for 1-hour),
+                # and speed is in the key because fast mode is billed at a
+                # premium for the same model.
+                model_map = {
+                    key: (t[0], t[1], t[2], t[4], t[5]) for key, t in rec.tokens.items()
+                }
+                daily_map[date_str].cost_usd = estimate_daily_cost(model_map, date=date_str)
+                for mt in models_by_day[date_str]:
                     mt.cost_usd = estimate_daily_cost(
                         {key: tokens for key, tokens in model_map.items() if key[0] == mt.model},
                         date=date_str,
@@ -143,6 +190,62 @@ class LocalProvider:
             projects_by_day=projects_by_day,
         )
 
+    def _update_history(
+        self, instance: Instance, scanned: dict[str, DayRecord], today: date
+    ) -> dict[str, DayRecord]:
+        """Fold the finished scanned days into the instance's history and
+        return the scanned days completed from it.
+
+        Claude Code deletes transcripts file by file, so a day at the edge of
+        its cleanup window can survive only in part. A day's message count
+        only ever drops through deletion, so the record with more messages is
+        the more complete one, whichever source it comes from.
+        """
+        path = history_file(instance.path)
+        stored = history.load(path)
+        if stored is None:
+            return scanned
+
+        start = history_start(today).strftime(DATE_FMT_ISO)
+        today_str = today.strftime(DATE_FMT_ISO)
+        kept = {d: r for d, r in stored.items() if start <= d < today_str}
+        for date_str, rec in scanned.items():
+            if start <= date_str < today_str:
+                old = kept.get(date_str)
+                if old is None or rec.messages >= old.messages:
+                    kept[date_str] = rec
+        if kept != stored:
+            try:
+                history.save(path, kept)
+            except OSError:
+                pass
+
+        merged = dict(scanned)
+        for date_str, rec in kept.items():
+            current = merged.get(date_str)
+            if current is None or rec.messages > current.messages:
+                merged[date_str] = rec
+        return merged
+
+    def _archive_other_instances(self, shown: Instance, today: date) -> None:
+        """Keep the history of the instances not on display too: Claude Code
+        cleans an instance up as it starts, before CTFL can switch to it."""
+        start = history_start(today).strftime(DATE_FMT_ISO)
+        for instance in discover_instances():
+            if instance.path == shown.path:
+                continue
+            # A new day turns the last scan's today into a finished day.
+            signature = (today, newest_jsonl_mtime(instance.projects_dir))
+            if self._archived.get(instance.path) == signature:
+                continue
+            try:
+                self._update_history(
+                    instance, self._scan_jsonl_files(instance.projects_dir, start), today
+                )
+            except OSError:
+                continue
+            self._archived[instance.path] = signature
+
     def _read_stats_cache(self, stats_file: Path) -> dict:
         if not stats_file.exists():
             return {}
@@ -152,28 +255,15 @@ class LocalProvider:
         except (json.JSONDecodeError, OSError):
             return {}
 
-    def _scan_jsonl_files(
-        self, projects_dir: Path, cutoff_date: str
-    ) -> tuple[dict[str, DailyUsage], dict[str, list[ModelTokens]],
-               dict[str, list[ProjectUsage]],
-               dict[str, dict[tuple[str, str], tuple[int, int, int, int, int]]]]:
-        daily_map: dict[str, DailyUsage] = {}
-        model_agg: dict[str, dict[str, ModelTokens]] = defaultdict(dict)
-        session_dates: dict[str, set[str]] = defaultdict(set)
-        # date -> project_dir -> [tokens, messages]
-        project_agg: dict[str, dict[str, list[int]]] = defaultdict(
-            lambda: defaultdict(lambda: [0, 0])
-        )
-        # Per-day per-model token breakdown for cost estimation
-        daily_model_tokens: dict[str, dict[tuple[str, str], list[int]]] = defaultdict(
-            lambda: defaultdict(lambda: [0, 0, 0, 0, 0])
-        )
+    def _scan_jsonl_files(self, projects_dir: Path, cutoff_date: str) -> dict[str, DayRecord]:
+        days: dict[str, DayRecord] = {}
+        session_ids: dict[str, set[str]] = defaultdict(set)
         # Spans the whole scan, not just one file, so a request logged in more
         # than one place is still counted once.
         seen_requests: set[str] = set()
 
         if not projects_dir.exists():
-            return daily_map, {}, {}, {}
+            return days
 
         # A file last written before the window opened (local midnight) cannot
         # hold a record dated inside it.
@@ -191,10 +281,13 @@ class LocalProvider:
                 except OSError:
                     continue
 
+        # Other instances share the cache, so only this tree's entries go.
+        prefix = str(projects_dir) + os.sep
         scanned = {str(p) for p in jsonl_files}
-        for key in [k for k in self._file_cache if k[0] not in scanned]:
+        for key in [k for k in self._file_cache if k[0].startswith(prefix) and k[0] not in scanned]:
             del self._file_cache[key]
 
+        names: dict[str, str] = {}
         for filepath in jsonl_files:
             # Determine project directory from file path
             try:
@@ -218,73 +311,40 @@ class LocalProvider:
                         continue
                     seen_requests.add(request_id)
 
-                model = rec["model"]
-                rec_tokens = rec["input_tokens"] + rec["output_tokens"] + rec["cache_read"] + rec["cache_creation"]
-
-                if date_str not in daily_map:
-                    daily_map[date_str] = DailyUsage(date=date_str)
-                day = daily_map[date_str]
-                day.message_count += 1
-                day.input_tokens += rec["input_tokens"]
-                day.output_tokens += rec["output_tokens"]
-                day.cache_read_tokens += rec["cache_read"]
-                day.cache_creation_tokens += rec["cache_creation"]
+                day = days.get(date_str)
+                if day is None:
+                    day = days[date_str] = DayRecord()
+                day.messages += 1
 
                 session_id = rec.get("session_id", "")
                 if session_id:
-                    session_dates[date_str].add(session_id)
+                    session_ids[date_str].add(session_id)
 
-                mt = model_agg[date_str].get(model)
-                if mt is None:
-                    mt = model_agg[date_str][model] = ModelTokens(model=model)
-                mt.input_tokens += rec["input_tokens"]
-                mt.output_tokens += rec["output_tokens"]
-                mt.cache_read_tokens += rec["cache_read"]
-                mt.cache_creation_tokens += rec["cache_creation"]
+                key = (rec["model"], rec["speed"])
+                t = day.tokens.get(key, (0, 0, 0, 0, 0, 0))
+                day.tokens[key] = (
+                    t[0] + rec["input_tokens"],
+                    t[1] + rec["output_tokens"],
+                    t[2] + rec["cache_read"],
+                    t[3] + rec["cache_creation"],
+                    t[4] + rec["cache_creation_5m"],
+                    t[5] + rec["cache_creation_1h"],
+                )
 
-                # Per-day per-(model, speed) tokens for cost estimation. Cache
-                # writes are split by TTL because the two are billed at
-                # different rates (1.25x input for 5-minute, 2x for 1-hour),
-                # and speed is in the key because fast mode is billed at a
-                # premium for the same model.
-                dmt = daily_model_tokens[date_str][(model, rec["speed"])]
-                dmt[0] += rec["input_tokens"]
-                dmt[1] += rec["output_tokens"]
-                dmt[2] += rec["cache_read"]
-                dmt[3] += rec["cache_creation_5m"]
-                dmt[4] += rec["cache_creation_1h"]
-
-                # Aggregate per-project
                 if project_dir:
-                    agg = project_agg[date_str][project_dir]
-                    agg[0] += rec_tokens
-                    agg[1] += 1
+                    if project_dir not in names:
+                        names[project_dir] = _resolve_project_name(projects_dir / project_dir)
+                    name, tokens, messages = day.projects.get(project_dir, (names[project_dir], 0, 0))
+                    day.projects[project_dir] = (
+                        name,
+                        tokens + rec["input_tokens"] + rec["output_tokens"]
+                        + rec["cache_read"] + rec["cache_creation"],
+                        messages + 1,
+                    )
 
-        for date_str, sessions in session_dates.items():
-            if date_str in daily_map:
-                daily_map[date_str].session_count = len(sessions)
-
-        names: dict[str, str] = {}
-        projects_by_day: dict[str, list[ProjectUsage]] = {}
-        for date_str, per_project in project_agg.items():
-            projects_by_day[date_str] = []
-            for project_dir, (tokens, messages) in per_project.items():
-                if project_dir not in names:
-                    names[project_dir] = _resolve_project_name(projects_dir / project_dir)
-                projects_by_day[date_str].append(ProjectUsage(
-                    name=names[project_dir],
-                    path=project_dir,
-                    total_tokens=tokens,
-                    message_count=messages,
-                ))
-        models_by_day = {day: list(models.values()) for day, models in model_agg.items()}
-
-        # Convert daily_model_tokens lists to tuples
-        dmt_out: dict[str, dict[tuple[str, str], tuple[int, int, int, int, int]]] = {
-            date: {m: tuple(v) for m, v in models.items()}  # type: ignore[misc]
-            for date, models in daily_model_tokens.items()
-        }
-        return daily_map, models_by_day, projects_by_day, dmt_out
+        for date_str, sessions in session_ids.items():
+            days[date_str].sessions = len(sessions)
+        return days
 
     def _parse_jsonl(self, filepath: Path) -> list[dict]:
         try:

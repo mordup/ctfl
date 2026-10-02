@@ -118,7 +118,7 @@ def newest_activity_instance(instances: list[Instance]) -> Instance | None:
         projects = inst.projects_dir
         if not projects.is_dir():
             continue
-        newest = _newest_jsonl_mtime(projects)
+        newest = newest_jsonl_mtime(projects)
         if newest is None:
             continue
         if best is None or newest > best[0]:
@@ -129,7 +129,7 @@ def newest_activity_instance(instances: list[Instance]) -> Instance | None:
 _JSONL_GLOBS = ("*/*.jsonl", "*/*/subagents/*.jsonl")
 
 
-def _newest_jsonl_mtime(projects_dir: Path) -> float | None:
+def newest_jsonl_mtime(projects_dir: Path) -> float | None:
     newest: float | None = None
     try:
         for pattern in _JSONL_GLOBS:

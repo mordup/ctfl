@@ -125,22 +125,22 @@ class ProjectUsage:
 class UsageData:
     daily: list[DailyUsage] = field(default_factory=list)
     # Keyed by ISO date, so any period inside the fetched window can be
-    # totalled without fetching again (see models_since / projects_since).
+    # totalled without fetching again (see models_between / projects_between).
     models_by_day: dict[str, list[ModelTokens]] = field(default_factory=dict)
     projects_by_day: dict[str, list[ProjectUsage]] = field(default_factory=dict)
     limits: list[RateLimitInfo] = field(default_factory=list)
     error: str | None = None
 
 
-def models_since(data: UsageData, start: str) -> list[ModelTokens]:
-    """Per-model totals from start (ISO date) onwards, largest first.
+def models_between(data: UsageData, start: str, end: str) -> list[ModelTokens]:
+    """Per-model totals from start to end (ISO dates, inclusive), largest first.
 
     A model's cost is None when any of its days is unpriced, for the same
     reason a partial period total is withheld.
     """
     totals: dict[str, ModelTokens] = {}
     for day, models in data.models_by_day.items():
-        if day < start:
+        if not start <= day <= end:
             continue
         for m in models:
             t = totals.get(m.model)
@@ -158,10 +158,10 @@ def models_since(data: UsageData, start: str) -> list[ModelTokens]:
     return sorted((m for m in totals.values() if m.total > 0), key=lambda m: m.total, reverse=True)
 
 
-def projects_since(data: UsageData, start: str) -> list[ProjectUsage]:
+def projects_between(data: UsageData, start: str, end: str) -> list[ProjectUsage]:
     totals: dict[str, ProjectUsage] = {}
     for day, projects in data.projects_by_day.items():
-        if day < start:
+        if not start <= day <= end:
             continue
         for p in projects:
             t = totals.get(p.path)

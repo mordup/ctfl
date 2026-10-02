@@ -48,21 +48,52 @@ def test_week_start_on_its_own_first_day_is_that_day(lc_time):
     assert dates.week_start(first) == first
 
 
-@pytest.mark.parametrize("period, expected", [
-    ("today", _TUESDAY),
-    ("month", date(2026, 9, 1)),
-    ("week", date(2026, 9, 21)),
+@pytest.mark.parametrize("period, offset, expected", [
+    ("today", 0, (_TUESDAY, _TUESDAY)),
+    ("today", -1, (date(2026, 9, 21), date(2026, 9, 21))),
+    ("week", 0, (date(2026, 9, 21), date(2026, 9, 27))),
+    ("week", -1, (date(2026, 9, 14), date(2026, 9, 20))),
+    ("month", 0, (date(2026, 9, 1), date(2026, 9, 30))),
+    ("month", -1, (date(2026, 8, 1), date(2026, 8, 31))),
+    ("month", -9, (date(2025, 12, 1), date(2025, 12, 31))),
 ])
-def test_period_start(monkeypatch, period, expected):
+def test_period_range(monkeypatch, period, offset, expected):
     monkeypatch.setattr(dates, "_conventions", lambda: QLocale("fr_FR"))
-    assert dates.period_start(period, _TUESDAY) == expected
+    assert dates.period_range(period, _TUESDAY, offset) == expected
+
+
+@pytest.mark.parametrize("period, offset, expected", [
+    ("today", 0, "Today"),
+    ("today", -1, "Yesterday"),
+    ("today", -2, "Sun 20 Sep"),
+    ("week", 0, "This week"),
+    ("week", -1, "Last week"),
+    ("week", -2, "7 Sep \u2013 13 Sep"),
+    ("month", 0, "September"),
+    ("month", -9, "December 2025"),
+])
+def test_period_label(monkeypatch, period, offset, expected):
+    monkeypatch.setattr(dates, "_conventions", lambda: QLocale("fr_FR"))
+    assert dates.period_label(period, _TUESDAY, offset) == expected
+
+
+@pytest.mark.parametrize("period, offset, expected", [
+    ("month", 0, True),
+    ("month", -1, False),             # August is the oldest month kept
+    ("week", -7, True),               # 27 Jul - 2 Aug still reaches into August
+    ("week", -8, False),
+    ("today", -51, True),             # 2 August
+    ("today", -52, False),
+])
+def test_navigation_stops_at_the_previous_month(monkeypatch, period, offset, expected):
+    monkeypatch.setattr(dates, "_conventions", lambda: QLocale("fr_FR"))
+    assert dates.has_earlier_period(period, _TUESDAY, offset) is expected
 
 
 @pytest.mark.parametrize("today, days", [
-    (_TUESDAY, 22),               # month reaches further back than the week
-    (date(2026, 10, 2), 5),       # week started in September, month on the 1st
-    (date(2026, 9, 1), 2),        # Tuesday the 1st: week began Monday 31 Aug
+    (_TUESDAY, 53),                   # 1 August to 22 September
+    (date(2026, 3, 1), 29),           # 1 February to 1 March
+    (date(2026, 8, 31), 62),
 ])
-def test_days_to_fetch_covers_every_period(monkeypatch, today, days):
-    monkeypatch.setattr(dates, "_conventions", lambda: QLocale("fr_FR"))
+def test_days_to_fetch_reaches_the_previous_month(today, days):
     assert dates.days_to_fetch(today) == days

@@ -13,7 +13,7 @@ from pathlib import Path
 import pytest
 
 from ctfl.config import Config
-from ctfl.providers import models_since
+from ctfl.providers import models_between
 from ctfl.providers.instance import Instance
 from ctfl.providers.local import LocalProvider
 
@@ -100,7 +100,7 @@ def test_by_model_counts_a_shared_day_once(tmp_path, monkeypatch):
     provider = _setup(
         tmp_path, monkeypatch, [_record(1)], _cache({1: {"claude-opus-5": 999_999}})
     )
-    by_model = models_since(provider.fetch(days=7), "")
+    by_model = models_between(provider.fetch(days=7), "", "9999-12-31")
     assert [(m.model, m.total, m.breakdown_available) for m in by_model] == [
         ("claude-opus-5", 150, True)
     ]
@@ -112,7 +112,7 @@ def test_by_model_merges_cache_only_day_without_breakdown(tmp_path, monkeypatch)
         [_record(1)],
         _cache({3: {"claude-opus-5": 5_000, "claude-sonnet-5": 700}}),
     )
-    by_model = {m.model: m for m in models_since(provider.fetch(days=7), "")}
+    by_model = {m.model: m for m in models_between(provider.fetch(days=7), "", "9999-12-31")}
     assert by_model["claude-opus-5"].total == 5_150
     assert not by_model["claude-opus-5"].breakdown_available
     assert by_model["claude-sonnet-5"].total == 700

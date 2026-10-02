@@ -1,4 +1,4 @@
-from ctfl.providers import models_since
+from ctfl.providers import models_between
 from ctfl.providers.api import ApiProvider
 
 
@@ -31,7 +31,7 @@ def test_parse_basic():
     assert result.daily[0].input_tokens == 1000
     assert result.daily[0].output_tokens == 500
     assert result.daily[0].cost_usd == 0.42
-    assert [m.model for m in models_since(result, "")] == ["claude-opus-4-6"]
+    assert [m.model for m in models_between(result, "", "9999-12-31")] == ["claude-opus-4-6"]
 
 
 def test_parse_no_cost():
@@ -87,5 +87,5 @@ def test_parse_aggregates_same_date():
     assert day_03.input_tokens == 3000
     assert day_03.output_tokens == 1300
     # Models should still be separate
-    assert len(models_since(result, "")) == 2
+    assert len(models_between(result, "", "9999-12-31")) == 2
     assert len(result.models_by_day["2026-03-03"]) == 2

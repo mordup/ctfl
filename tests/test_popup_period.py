@@ -70,7 +70,7 @@ def test_tabs_are_usage_model_project(popup):
 
 def test_dropdown_offers_the_three_periods(popup):
     labels = [popup._period_combo.itemText(i) for i in range(popup._period_combo.count())]
-    assert labels == ["Today", "This week", "This month"]
+    assert labels == ["Day", "Week", "Month"]
 
 
 def test_dropdown_opens_on_the_saved_period(qapp):
@@ -181,3 +181,41 @@ def test_short_name_has_no_tooltip(popup, qapp):
     qapp.processEvents()
     [label] = [lbl for lbl in popup._project_chart.findChildren(QLabel) if lbl.text() == "Ctfl"]
     assert label.toolTip() == ""
+
+
+def test_previous_period_shows_only_its_days(popup):
+    popup.update_data(_data())
+    popup._prev_period_btn.click()
+    assert popup._period_name_label.text() == "Yesterday"
+    assert popup._period_total_label.text() == "1.0M tokens · $1.00"
+    assert "Opus 5.5" not in _texts(popup._model_chart)
+    assert "Ctfl" not in _texts(popup._project_chart)
+
+
+def test_next_is_only_offered_on_a_past_period(popup):
+    popup.update_data(_data())
+    assert not popup._next_period_btn.isEnabled()
+    popup._prev_period_btn.click()
+    assert popup._next_period_btn.isEnabled()
+    popup._next_period_btn.click()
+    assert popup._period_name_label.text() == "Today"
+
+
+def test_previous_stops_at_the_previous_month(popup):
+    _select(popup, "month")
+    assert popup._prev_period_btn.isEnabled()
+    popup._prev_period_btn.click()
+    assert not popup._prev_period_btn.isEnabled()
+
+
+def test_changing_period_type_returns_to_the_current_period(popup):
+    popup._prev_period_btn.click()
+    _select(popup, "week")
+    assert popup._period_name_label.text() == "This week"
+
+
+def test_closing_returns_to_the_current_period(popup, qapp):
+    popup.show()
+    popup._prev_period_btn.click()
+    popup.hide()
+    assert popup._period_name_label.text() == "Today"

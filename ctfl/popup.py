@@ -15,6 +15,7 @@ from PyQt6.QtWidgets import (
     QScrollArea,
     QStackedWidget,
     QTabWidget,
+    QToolButton,
     QVBoxLayout,
     QWidget,
 )
@@ -27,7 +28,15 @@ from .constants import (
     FONT_SIZE_SMALL,
     ICON_THEME_NAME,
 )
-from .dates import PERIOD_LABELS, PERIODS, day_label, period_start, time_hm
+from .dates import (
+    PERIOD_LABELS,
+    PERIODS,
+    day_label,
+    has_earlier_period,
+    period_label,
+    period_range,
+    time_hm,
+)
 from .providers import (
     RateLimitInfo,
     UsageData,
@@ -35,8 +44,8 @@ from .providers import (
     format_credits_range,
     format_reset,
     format_tokens,
-    models_since,
-    projects_since,
+    models_between,
+    projects_between,
 )
 
 _PROGRESS_BAR_STYLE = (
@@ -79,6 +88,8 @@ class PopupWidget(QWidget):
         # "Loading..." or an error, shown in place of the period total until
         # the next data arrives, whatever the period.
         self._status_text: str | None = None
+        # Periods back from the current one; every opening starts on it.
+        self._period_offset = 0
         self._build_ui()
         self._fit_to_content()
 
@@ -102,6 +113,25 @@ class PopupWidget(QWidget):
         self._period_combo.setCurrentIndex(self._period_combo.findData(self._config.period))
         self._period_combo.currentIndexChanged.connect(self._on_period_changed)
         period_row.addWidget(self._period_combo)
+        self._prev_period_btn = QToolButton()
+        self._prev_period_btn.setArrowType(Qt.ArrowType.LeftArrow)
+        self._prev_period_btn.setAutoRaise(True)
+        self._prev_period_btn.clicked.connect(lambda: self._step_period(-1))
+        period_row.addWidget(self._prev_period_btn)
+        self._period_name_label = QLabel()
+        self._period_name_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        # Wide enough for the longest name, so the arrows hold still.
+        metrics = self._period_name_label.fontMetrics()
+        self._period_name_label.setMinimumWidth(max(
+            metrics.horizontalAdvance(text) for text in ("Sep 30 \u2013 Oct 30", "September 2026")
+        ) + 8)
+        period_row.addWidget(self._period_name_label)
+        self._next_period_btn = QToolButton()
+        self._next_period_btn.setArrowType(Qt.ArrowType.RightArrow)
+        self._next_period_btn.setAutoRaise(True)
+        self._next_period_btn.clicked.connect(lambda: self._step_period(1))
+        period_row.addWidget(self._next_period_btn)
+        period_row.addSpacing(8)
         # Also carries the loading and error states.
         self._period_total_label = QLabel()
         self._period_total_label.setTextFormat(Qt.TextFormat.PlainText)
@@ -158,10 +188,28 @@ class PopupWidget(QWidget):
 
     def _on_period_changed(self, _index: int) -> None:
         self._config.period = self._period_combo.currentData()
+        self._period_offset = 0
         self._render_period()
         self._fit_to_content()
 
+    def _step_period(self, step: int) -> None:
+        self._period_offset += step
+        self._render_period()
+        self._fit_to_content()
+
+    def hideEvent(self, event) -> None:
+        super().hideEvent(event)
+        if not event.spontaneous() and self._period_offset:
+            self._period_offset = 0
+            self._render_period()
+
     def _render_period(self) -> None:
+        period = self._period_combo.currentData()
+        today = _dt.now().date()
+        self._period_name_label.setText(period_label(period, today, self._period_offset))
+        self._prev_period_btn.setEnabled(has_earlier_period(period, today, self._period_offset))
+        self._next_period_btn.setEnabled(self._period_offset < 0)
+
         data = self._data
         if data is None:
             self._period_total_label.setText(self._status_text or "")
@@ -171,8 +219,9 @@ class PopupWidget(QWidget):
             return
 
         show_bd = self._config.show_token_breakdown
-        start = period_start(self._period_combo.currentData(), _dt.now().date()).isoformat()
-        days = [d for d in data.daily if d.date >= start]
+        first, last = period_range(period, today, self._period_offset)
+        start, end = first.isoformat(), last.isoformat()
+        days = [d for d in data.daily if start <= d.date <= end]
 
         total_text = f"{format_tokens(sum(d.total_tokens for d in days))} tokens"
         total_cost = _period_cost(days)
@@ -197,7 +246,7 @@ class PopupWidget(QWidget):
             daily_rows.append((label, day.total_tokens, max_day_tokens, detail, breakdown))
         self._daily_chart.set_rows(daily_rows)
 
-        models = models_since(data, start)
+        models = models_between(data, start, end)
         max_model_total = max((m.total for m in models), default=1) or 1
         model_rows = []
         for mt in models:
@@ -212,7 +261,7 @@ class PopupWidget(QWidget):
         self._model_chart.set_rows(model_rows)
 
         # No token breakdown is available per project
-        projects = projects_since(data, start)
+        projects = projects_between(data, start, end)
         max_project = max((p.total_tokens for p in projects), default=1) or 1
         self._project_chart.set_rows([
             (proj.name, proj.total_tokens, max_project, format_tokens(proj.total_tokens), None)

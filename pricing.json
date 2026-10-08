@@ -1,8 +1,9 @@
 {
   "schema": 1,
-  "updated": "2026-09-29",
+  "updated": "2026-10-08",
   "models": {
-    "sonnet-5-5": {"input": 2.0, "output": 10.0, "cache_read": 0.2, "cache_write_5m": 2.5, "cache_write_1h": 4.0}
+    "haiku-5-5": {"input": 0.5, "output": 2.5, "cache_read": 0.05, "cache_write_5m": 0.625, "cache_write_1h": 1.0},
+    "sonnet-5-5": {"input": 2.0, "output": 10.0, "cache_read": 0.1, "cache_write_5m": 2.5, "cache_write_1h": 4.0}
   },
   "fast": {},
   "ignore": ["haiku-3-5"]

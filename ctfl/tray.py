@@ -382,7 +382,7 @@ class TrayIcon(QSystemTrayIcon):
         today_data = next((d for d in data.daily if d.date == today), None)
         if not today_data:
             return None
-        line = f"Today: {format_tokens(today_data.total_tokens)} tokens"
+        line = f"Today on this computer: {format_tokens(today_data.total_tokens)} tokens"
         if today_data.cost_usd is not None:
             line += f" · {format_cost(today_data.cost_usd)}"
         return line

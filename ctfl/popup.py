@@ -75,6 +75,15 @@ def _wrap_in_scroll(widget: QWidget) -> QScrollArea:
     return area
 
 
+def _section_heading(text: str) -> QLabel:
+    label = QLabel(text)
+    font = label.font()
+    font.setBold(True)
+    font.setPointSizeF(font.pointSizeF() * 1.15)
+    label.setFont(font)
+    return label
+
+
 class PopupWidget(QWidget):
     refresh_requested = pyqtSignal()
     settings_requested = pyqtSignal()
@@ -105,6 +114,10 @@ class PopupWidget(QWidget):
         self._limits_layout.setSpacing(6)
         self._limits_frame.setVisible(False)
         layout.addWidget(self._limits_frame)
+
+        # Built from this computer's transcripts only, whereas the plan limits
+        # above count every device on the account.
+        layout.addWidget(_section_heading("Usage on this computer"))
 
         period_row = QHBoxLayout()
         self._period_combo = QComboBox()
@@ -324,12 +337,7 @@ class PopupWidget(QWidget):
 
         self._limits_frame.setVisible(True)
 
-        section_label = QLabel("Plan usage limits")
-        font = section_label.font()
-        font.setBold(True)
-        font.setPointSizeF(font.pointSizeF() * 1.15)
-        section_label.setFont(font)
-        self._limits_layout.addWidget(section_label)
+        self._limits_layout.addWidget(_section_heading("Plan usage limits"))
 
         from .providers.prediction import predict_exhaustion
 

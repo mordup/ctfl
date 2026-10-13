@@ -46,7 +46,7 @@ def test_sync_time_sits_in_the_header(plan):
     tray._update_tooltip(_today())
     lines = tray.tooltip.splitlines()
     assert lines[1].startswith("Max 5x · synced ")
-    assert lines[2] == "Today: 48.1M tokens · $31.08"
+    assert lines[2] == "Today on this computer: 48.1M tokens · $31.08"
 
 
 def test_sync_time_alone_starts_the_header(plan):
@@ -59,7 +59,7 @@ def test_sync_time_alone_starts_the_header(plan):
 def test_no_sync_time_when_disabled(plan):
     tray = _Tray(tooltip_sync=False)
     tray._update_tooltip(_today())
-    assert tray.tooltip.splitlines()[1:3] == ["Max 5x", "Today: 48.1M tokens · $31.08"]
+    assert tray.tooltip.splitlines()[1:3] == ["Max 5x", "Today on this computer: 48.1M tokens · $31.08"]
 
 
 def test_weekly_line_names_its_window():

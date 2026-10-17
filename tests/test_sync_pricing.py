@@ -51,8 +51,9 @@ def test_parse_page_reads_standard_rates():
     assert standard["sonnet-5"] == (2.0, 10.0, 0.2, 2.5, 4.0)
 
 
-def test_parse_page_splits_shared_fast_rows_and_scales_cache_rates():
-    _, fast = sync_pricing.parse_page(_page())
+@pytest.mark.parametrize("fast_table", [_FAST, _FAST.replace(" / MTok", " USD / MTok")])
+def test_parse_page_splits_shared_fast_rows_and_scales_cache_rates(fast_table):
+    _, fast = sync_pricing.parse_page(_page(fast=fast_table))
     assert fast["opus-5-5"] == (8.0, 40.0, 0.4, 10.0, 16.0)
     assert fast["opus-5"] == fast["opus-4-8"] == (10.0, 50.0, 1.0, 12.5, 20.0)
 

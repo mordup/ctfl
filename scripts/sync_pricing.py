@@ -34,7 +34,7 @@ _MAIN_COLUMNS = {
 _FAST_COLUMNS = ["Model", "Input", "Output"]
 _MIN_MAIN_ROWS = 5
 _NAME_RE = re.compile(r"Claude ([A-Za-z]+) (\d+(?:\.\d+)*)")
-_PRICE_RE = re.compile(r"\$(\d+(?:\.\d+)?) / MTok")
+_PRICE_RE = re.compile(r"\$(\d+(?:\.\d+)?)(?: USD)? / MTok")
 _SUP_RE = re.compile(r"<sup>.*?</sup>")
 
 Rates = tuple[float, float, float, float, float]
